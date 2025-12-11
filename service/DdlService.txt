@@ -1,0 +1,77 @@
+package service;
+
+import com.dsl.parser.DslJsonParser;
+import com.dsl.router.DatabaseRouter;
+import com.dsl.translator.AlterTranslator;
+import com.dsl.translator.CreateTranslator;
+import CreateDslLexer;
+import CreateDslParser;
+import AlterDslLexer;
+import AlterDslParser;
+import org.antlr.v4.runtime.*;
+import org.springframework.stereotype.Service;
+import java.util.Map;
+
+@Service
+public class DdlService {
+
+    private final CreateTranslator createT = new CreateTranslator();
+    private final AlterTranslator alterT = new AlterTranslator();
+    private final DslJsonParser parser = new DslJsonParser();
+    private final DatabaseRouter router;
+
+    public DdlService(DatabaseRouter r) { this.router = r; }
+
+    public String create(String dsl) throws Exception {
+        var ctx = createParse(dsl);
+        String table = ctx.ID().getText();
+        Map<String,Object> json = parser.parse(ctx.json().getText());
+        var sql = createT.translate(table, json);
+
+        var jdbc = router.resolve(Map.of("table", table));
+        jdbc.execute(sql);
+
+        return sql;
+    }
+
+    public String alter(String dsl) {
+        var ctx = alterParse(dsl);
+        String table = ctx.ID(0).getText();
+        var jdbc = router.resolve(Map.of("table", table));
+
+        if (ctx.getText().contains("ADD COLUMN")) {
+            String col = ctx.ID(1).getText();
+            String type = ctx.ID(2).getText();
+            String sql = alterT.addColumn(table, col, type);
+            jdbc.execute(sql);
+            return sql;
+        }
+
+        if (ctx.getText().contains("DROP COLUMN")) {
+            String col = ctx.ID(1).getText();
+            String sql = alterT.dropColumn(table, col);
+            jdbc.execute(sql);
+            return sql;
+        }
+
+        String oldCol = ctx.ID(1).getText();
+        String newCol = ctx.ID(2).getText();
+        String sql = alterT.renameColumn(table, oldCol, newCol);
+        jdbc.execute(sql);
+        return sql;
+    }
+
+    private CreateDslParser.CommandContext createParse(String dsl) {
+        var input = CharStreams.fromString(dsl);
+        var lexer = new CreateDslLexer(input);
+        var tokens = new CommonTokenStream(lexer);
+        return new CreateDslParser(tokens).command();
+    }
+
+    private AlterDslParser.CommandContext alterParse(String dsl) {
+        var input = CharStreams.fromString(dsl);
+        var lexer = new AlterDslLexer(input);
+        var tokens = new CommonTokenStream(lexer);
+        return new AlterDslParser(tokens).command();
+    }
+}
