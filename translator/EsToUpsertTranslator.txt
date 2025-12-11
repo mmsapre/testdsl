@@ -1,0 +1,24 @@
+package translator;
+
+import java.util.Map;
+
+public class EsToUpsertTranslator {
+
+    public Map<String,Object> convert(Map<String,Object> es) {
+        Map<String,Object> update = (Map<String,Object>) es.get("update");
+        Map<String,Object> doc = (Map<String,Object>) update.get("doc");
+        String table = (String) update.get("table");
+        String id = (String) update.get("id");
+
+        return Map.of(
+                "table", table,
+                "keys", java.util.List.of("id"),
+                "values", mergeId(doc, id)
+        );
+    }
+
+    private Map<String,Object> mergeId(Map<String,Object> doc, String id) {
+        doc.put("id", id);
+        return doc;
+    }
+}
