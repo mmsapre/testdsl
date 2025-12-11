@@ -1,0 +1,16 @@
+grammar QueryDsl;
+
+import ExprCore;
+
+query
+    : 'SELECT' columns 'FROM' ID ( 'WHERE' condition )?
+    ;
+
+columns
+    : '*'
+    | ID (',' ID)*
+    ;
+
+condition
+    : ID '=' STRING
+    ;
