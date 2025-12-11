@@ -1,0 +1,36 @@
+package dispatcher;
+
+import com.dsl.service.*;
+import org.springframework.stereotype.Component;
+
+@Component
+public class CommandDispatcher {
+
+    private final UpsertService upsert;
+    private final DdlService ddl;
+    private final QueryService query;
+    private final EsUpdateService es;
+    private final Scd2Service scd2;
+
+    public CommandDispatcher(
+            UpsertService u,
+            DdlService d,
+            QueryService q,
+            EsUpdateService e,
+            Scd2Service s) {
+        this.upsert = u; this.ddl = d; this.query = q; this.es = e; this.scd2 = s;
+    }
+
+    public String dispatch(String dsl) throws Exception {
+        String x = dsl.trim().toUpperCase();
+        if (x.startsWith("UPSERT BATCH")) return upsert.execute(dsl);
+        if (x.startsWith("UPSERT")) return upsert.execute(dsl);
+        if (x.startsWith("CREATE")) return ddl.create(dsl);
+        if (x.startsWith("ALTER")) return ddl.alter(dsl);
+        if (x.startsWith("SCD2")) return scd2.execute(dsl);
+        if (x.startsWith("SELECT")) return query.execute(dsl);
+        if (x.startsWith("UPDATE FROM_ES")) return es.execute(dsl);
+
+        throw new IllegalArgumentException("Unknown DSL: " + dsl);
+    }
+}
