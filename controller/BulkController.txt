@@ -1,0 +1,19 @@
+package controller;
+
+import com.dsl.bulk.BulkDispatcher;
+import com.dsl.dto.BulkRequest;
+import lombok.RequiredArgsConstructor;
+import org.springframework.web.bind.annotation.*;
+
+@RestController
+@RequestMapping("/bulk")
+@RequiredArgsConstructor
+public class BulkController {
+
+    private final BulkDispatcher dispatcher;
+
+    @PostMapping
+    public String bulk(@RequestBody BulkRequest req) throws Exception {
+        return dispatcher.dispatch(req);
+    }
+}
