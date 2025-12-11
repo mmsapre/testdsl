@@ -1,0 +1,20 @@
+grammar JsonCore;
+
+json
+    : JSON_VALUE
+    ;
+
+JSON_VALUE
+    : JSON_OBJECT
+    | JSON_ARRAY
+    ;
+
+JSON_OBJECT
+    : '{' ( . )*? '}'
+    ;
+
+JSON_ARRAY
+    : '[' ( . )*? ']'
+    ;
+
+WS : [ \t\r\n]+ -> skip ;
