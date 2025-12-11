@@ -1,0 +1,44 @@
+package bulk;
+
+import org.postgresql.PGConnection;
+import org.postgresql.copy.CopyManager;
+import org.postgresql.core.BaseConnection;
+
+import java.io.ByteArrayInputStream;
+import java.nio.charset.StandardCharsets;
+import java.sql.SQLException;
+import java.util.List;
+import java.util.Map;
+
+public class BulkInsertEngine {
+
+    public void bulkInsert(PGConnection pg, String schema, String table, List<Map<String,Object>> rows)
+            throws Exception {
+
+        if (rows == null || rows.isEmpty())
+            return;
+
+        List<String> columns = rows.get(0).keySet().stream().toList();
+
+        String copySql = "COPY " + schema + "." + table +
+                " (" + String.join(",", columns) + ") FROM STDIN WITH (FORMAT CSV)";
+
+        CopyManager copy = new CopyManager((BaseConnection) pg);
+
+        StringBuilder sb = new StringBuilder();
+
+        for (Map<String,Object> row : rows) {
+            for (int i = 0; i < columns.size(); i++) {
+                Object val = row.get(columns.get(i));
+                sb.append(val == null ? "" : val.toString());
+                if (i < columns.size() - 1) sb.append(",");
+            }
+            sb.append("\n");
+        }
+
+        ByteArrayInputStream input =
+                new ByteArrayInputStream(sb.toString().getBytes(StandardCharsets.UTF_8));
+
+        copy.copyIn(copySql, input);
+    }
+}
