@@ -1,0 +1,11 @@
+package translator;
+
+public class QueryTranslator {
+
+    public String translate(String cols, String table, String condition) {
+        String sql = "SELECT " + cols + " FROM " + table;
+        if (condition != null)
+            sql += " WHERE " + condition;
+        return sql + ";";
+    }
+}
