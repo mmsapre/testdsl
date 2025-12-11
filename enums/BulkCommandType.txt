@@ -1,0 +1,9 @@
+package enums;
+
+public enum BulkCommandType {
+    BULK_INSERT,
+    BULK_UPSERT,
+    BULK_SCD2,
+    BULK_DELETE,
+    BULK_MERGE
+}
