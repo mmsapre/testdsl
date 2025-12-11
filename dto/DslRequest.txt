@@ -1,0 +1,19 @@
+package dto;
+
+import lombok.Data;
+import java.util.List;
+import java.util.Map;
+
+@Data
+public class DslRequest {
+
+    private String command;         // UPSERT, UPSERT_BATCH, CREATE_TABLE, etc.
+    private String table;           // accounts, orders, ...
+    private String indexName;       // for index DSL
+    private boolean unique;         // for unique index
+
+    private Map<String, Object> payload;        // single row
+    private List<Map<String, Object>> rows;     // batch rows
+
+    private List<String> columns;   // for index creation
+}
