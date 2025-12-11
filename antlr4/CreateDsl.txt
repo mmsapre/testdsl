@@ -1,0 +1,7 @@
+grammar CreateDsl;
+
+import JsonCore, ExprCore;
+
+command
+    : 'CREATE' 'TABLE' ID 'WITH' json
+    ;
