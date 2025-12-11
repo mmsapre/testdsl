@@ -1,0 +1,12 @@
+@RestController
+@RequestMapping("/query")
+@RequiredArgsConstructor
+public class QueryController {
+
+    private final QueryService service;
+
+    @PostMapping
+    public String run(@RequestBody String dsl) {
+        return service.execute(dsl);
+    }
+}
