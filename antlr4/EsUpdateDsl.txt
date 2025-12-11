@@ -1,0 +1,7 @@
+grammar EsUpdateDsl;
+
+import JsonCore;
+
+command
+    : 'UPDATE' 'FROM_ES' 'WITH' json
+    ;
