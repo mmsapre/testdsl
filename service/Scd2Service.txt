@@ -1,0 +1,46 @@
+package service;
+
+import com.dsl.parser.DslJsonParser;
+import com.dsl.translator.AdvancedUpsertTranslator;
+import com.dsl.router.DatabaseRouter;
+import UpsertDslLexer;
+import UpsertDslParser;
+import org.antlr.v4.runtime.*;
+import org.springframework.stereotype.Service;
+import java.util.Map;
+
+@Service
+public class Scd2Service {
+
+    private final AdvancedUpsertTranslator translator;
+    private final DslJsonParser jsonParser;
+    private final DatabaseRouter router;
+
+    public Scd2Service(AdvancedUpsertTranslator t, DslJsonParser p, DatabaseRouter r) {
+        this.translator = t; this.jsonParser = p; this.router = r;
+    }
+
+    public String execute(String dsl) throws Exception {
+        var ctx = parse(dsl);
+        var json = jsonParser.parse(ctx.json().getText());
+
+        String table = ctx.ID().getText();
+        json.put("table", table);
+
+        var jdbc = router.resolve(json);
+        var sqls = translator.generateScd2(
+                table,
+                (java.util.List<String>) json.get("keys"),
+                (Map<String,Object>) json.get("values")
+        );
+        sqls.forEach(jdbc::execute);
+        return String.join("\n", sqls);
+    }
+
+    private UpsertDslParser.CommandContext parse(String dsl) {
+        var input = CharStreams.fromString(dsl);
+        var lexer = new UpsertDslLexer(input);
+        var tokens = new CommonTokenStream(lexer);
+        return new UpsertDslParser(tokens).command();
+    }
+}
