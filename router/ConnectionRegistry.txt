@@ -1,0 +1,31 @@
+package router;
+
+import com.zaxxer.hikari.HikariConfig;
+import com.zaxxer.hikari.HikariDataSource;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Component;
+
+import java.util.HashMap;
+import java.util.Map;
+
+@Component
+public class ConnectionRegistry {
+
+    private final Map<String, JdbcTemplate> registry = new HashMap<>();
+
+    public ConnectionRegistry(@Value("${datasource.connections}") Map<String,Map<String,String>> cfg) {
+        cfg.forEach((alias, c) -> {
+            HikariConfig hc = new HikariConfig();
+            hc.setJdbcUrl(c.get("url"));
+            hc.setUsername(c.get("username"));
+            hc.setPassword(c.get("password"));
+            hc.setDriverClassName(c.get("driver-class-name"));
+            registry.put(alias, new JdbcTemplate(new HikariDataSource(hc)));
+        });
+    }
+
+    public JdbcTemplate get(String alias) {
+        return registry.get(alias);
+    }
+}
