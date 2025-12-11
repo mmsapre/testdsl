@@ -1,0 +1,21 @@
+grammar UpsertDsl;
+
+import JsonCore, ExprCore;
+
+command
+    : upsertCmd
+    | batchUpsertCmd
+    | scd2Cmd
+    ;
+
+upsertCmd
+    : 'UPSERT' 'INTO' ID 'WITH' json
+    ;
+
+batchUpsertCmd
+    : 'UPSERT' 'BATCH' 'INTO' ID 'WITH' json
+    ;
+
+scd2Cmd
+    : 'SCD2' 'INTO' ID 'WITH' json
+    ;
