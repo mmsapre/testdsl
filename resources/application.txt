@@ -1,0 +1,19 @@
+datasource:
+  connections:
+    default:
+      url: jdbc:postgresql://localhost:5432/defaultdb
+      username: app
+      password: app
+      driver-class-name: org.postgresql.Driver
+
+    refdata:
+      url: jdbc:postgresql://localhost:5432/refdata
+      username: ref
+      password: ref
+      driver-class-name: org.postgresql.Driver
+
+    trades:
+      url: jdbc:postgresql://localhost:5432/trades
+      username: tr
+      password: tr
+      driver-class-name: org.postgresql.Driver
