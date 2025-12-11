@@ -1,0 +1,12 @@
+@RestController
+@RequestMapping("/es")
+@RequiredArgsConstructor
+public class EsUpdateController {
+
+    private final EsUpdateService service;
+
+    @PostMapping("/update")
+    public String update(@RequestBody String dsl) throws Exception {
+        return service.execute(dsl);
+    }
+}
