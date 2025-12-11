@@ -1,0 +1,7 @@
+grammar Scd2Dsl;
+
+import JsonCore, ExprCore;
+
+command
+    : 'SCD2' 'INTO' ID 'WITH' json
+    ;
