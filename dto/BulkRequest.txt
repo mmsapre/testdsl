@@ -1,0 +1,21 @@
+package dto;
+
+import com.dsl.enums.BulkCommandType;
+import lombok.Data;
+
+import java.util.List;
+import java.util.Map;
+
+@Data
+public class BulkRequest {
+
+    private BulkCommandType command;
+
+    private String table;
+    private String schema = "public";
+    private String connectionAlias = "default";
+
+    private List<Map<String, Object>> rows;
+
+    private List<String> keys;   // for MERGE or UPSERT
+}
