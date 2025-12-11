@@ -1,0 +1,70 @@
+package service;
+
+import com.dsl.parser.DslJsonParser;
+import com.dsl.router.DatabaseRouter;
+import com.dsl.translator.AdvancedUpsertTranslator;
+import UpsertDslLexer;
+import UpsertDslParser;
+import org.antlr.v4.runtime.*;
+import org.springframework.stereotype.Service;
+import java.util.Map;
+
+@Service
+public class UpsertService {
+
+    private final AdvancedUpsertTranslator translator;
+    private final DslJsonParser jsonParser;
+    private final DatabaseRouter router;
+
+    public UpsertService(AdvancedUpsertTranslator t, DslJsonParser p, DatabaseRouter r) {
+        this.translator = t; this.jsonParser = p; this.router = r;
+    }
+
+    public String execute(String dsl) throws Exception {
+        UpsertDslParser.CommandContext ctx = parse(dsl);
+        Map<String,Object> json = jsonParser.parse(ctx.json().getText());
+        var jdbc = router.resolve(json);
+
+        if (ctx.upsertCmd() != null) {
+            String table = ctx.upsertCmd().ID().getText();
+            json.put("table", table);
+            String sql = translator.generateUpsert(json);
+            jdbc.execute(sql);
+            return sql;
+        }
+
+        if (ctx.batchUpsertCmd() != null) {
+            String table = ctx.batchUpsertCmd().ID().getText();
+            json.put("table", table);
+            String sql = translator.generateBatchUpsert(
+                    table,
+                    (java.util.List<String>) json.get("keys"),
+                    (java.util.List<Map<String,Object>>) json.get("batch")
+            );
+            jdbc.execute(sql);
+            return sql;
+        }
+
+        if (ctx.scd2Cmd() != null) {
+            String table = ctx.scd2Cmd().ID().getText();
+            json.put("table", table);
+            var sqls = translator.generateScd2(
+                    table,
+                    (java.util.List<String>) json.get("keys"),
+                    (Map<String,Object>) json.get("values")
+            );
+            sqls.forEach(jdbc::execute);
+            return String.join("\n", sqls);
+        }
+
+        throw new RuntimeException("Unsupported UPSERT DSL");
+    }
+
+    private UpsertDslParser.CommandContext parse(String dsl) {
+        var input = CharStreams.fromString(dsl);
+        var lexer = new UpsertDslLexer(input);
+        var tokens = new CommonTokenStream(lexer);
+        var parser = new UpsertDslParser(tokens);
+        return parser.command();
+    }
+}
