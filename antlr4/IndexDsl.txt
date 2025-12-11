@@ -1,0 +1,20 @@
+grammar IndexDsl;
+
+import ExprCore;
+
+command
+    : createIndex
+    | dropIndex
+    ;
+
+createIndex
+    : 'CREATE' ('UNIQUE')? 'INDEX' ID 'ON' ID '(' columns ')'
+    ;
+
+dropIndex
+    : 'DROP' 'INDEX' ID
+    ;
+
+columns
+    : ID (',' ID)*
+    ;
