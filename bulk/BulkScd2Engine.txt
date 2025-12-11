@@ -1,0 +1,40 @@
+package bulk;
+
+import org.postgresql.PGConnection;
+
+import java.sql.Connection;
+import java.sql.Statement;
+import java.time.LocalDate;
+import java.util.List;
+import java.util.Map;
+
+public class BulkScd2Engine {
+
+    private final BulkInsertEngine copier = new BulkInsertEngine();
+
+    public void bulkScd2(PGConnection pg, String schema, String table,
+                         List<Map<String,Object>> versions,
+                         List<String> keys)
+            throws Exception {
+
+        try (Connection conn = pg.getWrappedConnection();
+             Statement st = conn.createStatement()) {
+
+            for (Map<String,Object> row : versions) {
+                // Close existing record
+                String where = keys.stream()
+                        .map(k -> k + "='" + row.get(k) + "'")
+                        .reduce((a,b)->a+" AND "+b).orElse("TRUE");
+
+                st.execute(
+                    "UPDATE " + schema + "." + table +
+                    " SET end_date = CURRENT_DATE WHERE " + where +
+                    " AND end_date = '9999-12-31'"
+                );
+            }
+
+            // Insert new versions using COPY
+            copier.bulkInsert(pg, schema, table, versions);
+        }
+    }
+}
