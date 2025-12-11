@@ -1,0 +1,14 @@
+package translator;
+
+import java.util.Map;
+
+public class CreateTranslator {
+
+    public String translate(String table, Map<String,Object> json) {
+        return "CREATE TABLE " + table + " (" +
+                String.join(", ", json.entrySet().stream()
+                        .map(e -> e.getKey() + " " + e.getValue())
+                        .toList()) +
+                ");";
+    }
+}
