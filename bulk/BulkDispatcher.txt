@@ -1,0 +1,44 @@
+package bulk;
+
+import com.dsl.dto.BulkRequest;
+import com.dsl.enums.BulkCommandType;
+import com.dsl.router.DatabaseRouter;
+import org.springframework.stereotype.Component;
+
+@Component
+public class BulkDispatcher {
+
+    private final DatabaseRouter router;
+    private final BulkInsertEngine insertEngine = new BulkInsertEngine();
+    private final BulkUpsertEngine upsertEngine = new BulkUpsertEngine();
+    private final BulkScd2Engine scd2Engine = new BulkScd2Engine();
+
+    public BulkDispatcher(DatabaseRouter router) {
+        this.router = router;
+    }
+
+    public String dispatch(BulkRequest req) throws Exception {
+
+        var pg = router.getPgConnection(req.getConnectionAlias());
+
+        switch (req.getCommand()) {
+
+            case BULK_INSERT -> {
+                insertEngine.bulkInsert(pg, req.getSchema(), req.getTable(), req.getRows());
+                return "Bulk inserted " + req.getRows().size() + " rows";
+            }
+
+            case BULK_UPSERT -> {
+                upsertEngine.bulkUpsert(pg, req.getSchema(), req.getTable(), req.getRows(), req.getKeys());
+                return "Bulk upsert completed for " + req.getRows().size() + " rows";
+            }
+
+            case BULK_SCD2 -> {
+                scd2Engine.bulkScd2(pg, req.getSchema(), req.getTable(), req.getRows(), req.getKeys());
+                return "Bulk SCD2 completed for " + req.getRows().size() + " rows";
+            }
+
+            default -> throw new IllegalArgumentException("Unknown bulk command: " + req.getCommand());
+        }
+    }
+}
