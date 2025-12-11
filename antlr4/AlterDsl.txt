@@ -1,0 +1,9 @@
+grammar AlterDsl;
+
+import ExprCore;
+
+command
+    : 'ALTER' 'TABLE' ID 'ADD' 'COLUMN' ID ID
+    | 'ALTER' 'TABLE' ID 'DROP' 'COLUMN' ID
+    | 'ALTER' 'TABLE' ID 'RENAME' 'COLUMN' ID 'TO' ID
+    ;
