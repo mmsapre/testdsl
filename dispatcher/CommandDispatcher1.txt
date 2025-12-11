@@ -1,0 +1,46 @@
+@Component
+public class CommandDispatcher {
+
+    private final UpsertService upsert;
+    private final DdlService ddl;
+    private final QueryService query;
+    private final EsUpdateService es;
+    private final Scd2Service scd2;
+    private final IndexService indexService;
+
+    public CommandDispatcher(
+            UpsertService u,
+            DdlService d,
+            QueryService q,
+            EsUpdateService e,
+            Scd2Service s,
+            IndexService i) {
+        this.upsert = u; 
+        this.ddl = d; 
+        this.query = q; 
+        this.es = e; 
+        this.scd2 = s;
+        this.indexService = i;
+    }
+
+    public String dispatch(String dsl) throws Exception {
+        String x = dsl.trim().toUpperCase();
+
+        if (x.startsWith("UPSERT BATCH")) return upsert.execute(dsl);
+        if (x.startsWith("UPSERT")) return upsert.execute(dsl);
+        if (x.startsWith("CREATE TABLE")) return ddl.create(dsl);
+        if (x.startsWith("ALTER TABLE")) return ddl.alter(dsl);
+        if (x.startsWith("SCD2")) return scd2.execute(dsl);
+        if (x.startsWith("SELECT")) return query.execute(dsl);
+        if (x.startsWith("UPDATE FROM_ES")) return es.execute(dsl);
+
+        // NEW for index DSL
+        if (x.startsWith("CREATE INDEX") || x.startsWith("CREATE UNIQUE INDEX"))
+            return indexService.execute(dsl);
+
+        if (x.startsWith("DROP INDEX"))
+            return indexService.execute(dsl);
+
+        throw new IllegalArgumentException("Unknown DSL: " + dsl);
+    }
+}
