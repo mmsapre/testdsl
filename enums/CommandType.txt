@@ -1,0 +1,25 @@
+package enums;
+
+public enum CommandType {
+
+    // UPSERT operations
+    UPSERT,
+    UPSERT_BATCH,
+
+    // SCD2 operations
+    SCD2,
+
+    // DDL operations
+    CREATE_TABLE,
+    ALTER_TABLE,
+
+    // INDEX operations
+    CREATE_INDEX,
+    DROP_INDEX,
+
+    // Query operations
+    QUERY,
+
+    // ES update operations
+    UPDATE_ES
+}
