@@ -1,0 +1,63 @@
+package service;
+
+import IndexDslLexer;
+import IndexDslParser;
+
+import com.dsl.router.DatabaseRouter;
+import com.dsl.translator.IndexTranslator;
+import org.antlr.v4.runtime.*;
+import org.springframework.stereotype.Service;
+
+import java.util.List;
+import java.util.Map;
+
+@Service
+public class IndexService {
+
+    private final IndexTranslator translator = new IndexTranslator();
+    private final DatabaseRouter router;
+
+    public IndexService(DatabaseRouter router) {
+        this.router = router;
+    }
+
+    public String execute(String dsl) {
+        var ctx = parse(dsl);
+
+        if (ctx.createIndex() != null) {
+            var c = ctx.createIndex();
+            boolean unique = (c.UNIQUE() != null);
+
+            String indexName = c.ID(0).getText();
+            String table = c.ID(1).getText();
+
+            List<String> cols =
+                    c.columns().ID().stream().map(t -> t.getText()).toList();
+
+            String sql = translator.createIndex(indexName, table, cols, unique);
+            router.resolve(Map.of("table", table)).execute(sql);
+
+            return sql;
+        }
+
+        if (ctx.dropIndex() != null) {
+            var d = ctx.dropIndex();
+            String indexName = d.ID().getText();
+
+            // no table name needed to route
+            String sql = translator.dropIndex(indexName);
+            router.resolve(Map.of("table", "default")).execute(sql);
+
+            return sql;
+        }
+
+        throw new RuntimeException("Unsupported index DSL: " + dsl);
+    }
+
+    private IndexDslParser.CommandContext parse(String dsl) {
+        var input = CharStreams.fromString(dsl);
+        var lexer = new IndexDslLexer(input);
+        var tokens = new CommonTokenStream(lexer);
+        return new IndexDslParser(tokens).command();
+    }
+}
