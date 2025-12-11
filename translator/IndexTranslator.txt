@@ -1,0 +1,18 @@
+package translator;
+
+import java.util.List;
+
+public class IndexTranslator {
+
+    public String createIndex(String indexName, String table, List<String> columns, boolean unique) {
+        String colList = String.join(",", columns);
+        return "CREATE " + (unique ? "UNIQUE " : "") +
+                "INDEX " + indexName +
+                " ON " + table +
+                " (" + colList + ");";
+    }
+
+    public String dropIndex(String indexName) {
+        return "DROP INDEX " + indexName + ";";
+    }
+}
