@@ -1,0 +1,94 @@
+package translator;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.*;
+
+public class AdvancedUpsertTranslator {
+
+    private final ObjectMapper mapper = new ObjectMapper();
+
+    public String generateUpsert(Map<String,Object> json) throws Exception {
+        String table = (String) json.get("table");
+        Map<String,Object> values = (Map<String,Object>) json.get("values");
+        List<String> keys = (List<String>) json.get("keys");
+
+        String cols = String.join(",", values.keySet());
+        String vals = buildValueList(values);
+        String conflict = String.join(",", keys);
+
+        String updates = buildUpdateAssignments(values, keys);
+
+        return "INSERT INTO " + table +
+                " (" + cols + ") VALUES (" + vals + ")" +
+                " ON CONFLICT (" + conflict + ") DO UPDATE SET " +
+                updates + ";";
+    }
+
+    private String buildValueList(Map<String,Object> values) throws Exception {
+        List<String> out = new ArrayList<>();
+        for (Object v : values.values()) {
+            if (v instanceof String)
+                out.add("'" + v + "'");
+            else
+                out.add(mapper.writeValueAsString(v));
+        }
+        return String.join(",", out);
+    }
+
+    private String buildUpdateAssignments(Map<String,Object> values, List<String> keys) throws Exception {
+        List<String> out = new ArrayList<>();
+        for (String col : values.keySet()) {
+            if (!keys.contains(col))
+                out.add(col + "=EXCLUDED." + col);
+        }
+        return String.join(",", out);
+    }
+
+    public String generateBatchUpsert(String table, List<String> keys, List<Map<String,Object>> rows) throws Exception {
+        Map<String,Object> first = rows.get(0);
+        String cols = String.join(",", first.keySet());
+
+        List<String> valueRows = new ArrayList<>();
+        for (Map<String,Object> r : rows)
+            valueRows.add("(" + buildValueList(r) + ")");
+
+        String conflict = String.join(",", keys);
+        String updates = buildUpdateAssignments(first, keys);
+
+        return "INSERT INTO " + table +
+                " (" + cols + ") VALUES " +
+                String.join(",", valueRows) +
+                " ON CONFLICT (" + conflict + ") DO UPDATE SET " +
+                updates + ";";
+    }
+
+    public List<String> generateScd2(String table, List<String> keys, Map<String,Object> values) throws Exception {
+        String pk = keys.get(0);
+        Object pkVal = values.get(pk);
+
+        String expireSql = "UPDATE " + table +
+                " SET valid_to = NOW(), active_flag = false WHERE " +
+                pk + "='" + pkVal + "' AND active_flag=true;";
+
+        Map<String,Object> newRow = new HashMap<>(values);
+        newRow.put("valid_from", "NOW()");
+        newRow.put("valid_to", "9999-12-31");
+        newRow.put("active_flag", true);
+
+        String cols = String.join(",", newRow.keySet());
+        List<String> vals = new ArrayList<>();
+        for (Object v : newRow.values()) {
+            if ("NOW()".equals(v))
+                vals.add("NOW()");
+            else if (v instanceof String)
+                vals.add("'" + v + "'");
+            else
+                vals.add(v.toString());
+        }
+
+        String insertSql = "INSERT INTO " + table +
+                " (" + cols + ") VALUES (" + String.join(",", vals) + ");";
+
+        return List.of(expireSql, insertSql);
+    }
+}
