@@ -1,0 +1,51 @@
+package bulk;
+
+import org.postgresql.PGConnection;
+
+import java.sql.Connection;
+import java.sql.Statement;
+import java.util.List;
+import java.util.Map;
+
+public class BulkUpsertEngine {
+
+    private final BulkInsertEngine copier = new BulkInsertEngine();
+
+    public void bulkUpsert(PGConnection pg, String schema, String table,
+                           List<Map<String,Object>> rows, List<String> keys)
+            throws Exception {
+
+        String tempTable = table + "_tmp_" + System.currentTimeMillis();
+
+        List<String> columns = rows.get(0).keySet().stream().toList();
+
+        try (Connection conn = pg.getWrappedConnection();
+             Statement st = conn.createStatement()) {
+
+            // create temp table
+            st.execute("CREATE TEMP TABLE " + tempTable + " AS SELECT * FROM " +
+                       schema + "." + table + " LIMIT 0");
+
+            // bulk insert into temp table
+            copier.bulkInsert(pg, "pg_temp", tempTable, rows);
+
+            // build merge (upsert)
+            String assignments = columns.stream()
+                    .filter(c -> !keys.contains(c))
+                    .map(c -> c + "=EXCLUDED." + c)
+                    .reduce((a, b) -> a + ", " + b)
+                    .orElse("");
+
+            String conflict = String.join(",", keys);
+
+            // merge into main table
+            st.execute(
+                "INSERT INTO " + schema + "." + table +
+                " (" + String.join(",", columns) + ")" +
+                " SELECT " + String.join(",", columns) +
+                " FROM " + tempTable +
+                " ON CONFLICT (" + conflict + ") DO UPDATE SET " + assignments
+            );
+        }
+    }
+}
