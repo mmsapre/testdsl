@@ -1,0 +1,37 @@
+package service;
+
+import QueryDslLexer;
+import QueryDslParser;
+import com.dsl.translator.QueryTranslator;
+import com.dsl.router.DatabaseRouter;
+import org.antlr.v4.runtime.*;
+import org.springframework.stereotype.Service;
+
+@Service
+public class QueryService {
+
+    private final QueryTranslator translator = new QueryTranslator();
+    private final DatabaseRouter router;
+
+    public QueryService(DatabaseRouter r) { this.router = r; }
+
+    public String execute(String dsl) {
+        var ctx = parse(dsl);
+
+        String cols = ctx.columns().getText();
+        String table = ctx.ID().getText();
+        String cond = (ctx.condition() != null ? ctx.condition().getText() : null);
+
+        var sql = translator.translate(cols, table, cond);
+        router.resolve(Map.of("table", table)).execute(sql);
+
+        return sql;
+    }
+
+    private QueryDslParser.QueryContext parse(String dsl) {
+        var input = CharStreams.fromString(dsl);
+        var lexer = new QueryDslLexer(input);
+        var tokens = new CommonTokenStream(lexer);
+        return new QueryDslParser(tokens).query();
+    }
+}
