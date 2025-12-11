@@ -1,0 +1,16 @@
+package translator;
+
+public class AlterTranslator {
+
+    public String addColumn(String table, String col, String type) {
+        return "ALTER TABLE " + table + " ADD COLUMN " + col + " " + type + ";";
+    }
+
+    public String dropColumn(String table, String col) {
+        return "ALTER TABLE " + table + " DROP COLUMN " + col + ";";
+    }
+
+    public String renameColumn(String table, String oldCol, String newCol) {
+        return "ALTER TABLE " + table + " RENAME COLUMN " + oldCol + " TO " + newCol + ";";
+    }
+}
