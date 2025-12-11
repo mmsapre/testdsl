@@ -1,0 +1,12 @@
+@RestController
+@RequestMapping("/scd2")
+@RequiredArgsConstructor
+public class Scd2Controller {
+
+    private final Scd2Service service;
+
+    @PostMapping
+    public String run(@RequestBody String dsl) throws Exception {
+        return service.execute(dsl);
+    }
+}
