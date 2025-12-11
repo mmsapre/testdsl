@@ -1,0 +1,43 @@
+package service;
+
+import com.dsl.parser.DslJsonParser;
+import com.dsl.translator.AdvancedUpsertTranslator;
+import com.dsl.translator.EsToUpsertTranslator;
+import com.dsl.router.DatabaseRouter;
+import EsUpdateDslLexer;
+import EsUpdateDslParser;
+import org.antlr.v4.runtime.*;
+import org.springframework.stereotype.Service;
+
+@Service
+public class EsUpdateService {
+
+    private final DslJsonParser jsonParser = new DslJsonParser();
+    private final EsToUpsertTranslator esToUpsert = new EsToUpsertTranslator();
+    private final AdvancedUpsertTranslator upsertTranslator;
+    private final DatabaseRouter router;
+
+    public EsUpdateService(AdvancedUpsertTranslator t, DatabaseRouter r) {
+        this.upsertTranslator = t; this.router = r;
+    }
+
+    public String execute(String dsl) throws Exception {
+        var ctx = parse(dsl);
+        var json = jsonParser.parse(ctx.json().getText());
+
+        Map<String,Object> upsert = esToUpsert.convert(json);
+        var jdbc = router.resolve(upsert);
+
+        var sql = upsertTranslator.generateUpsert(upsert);
+        jdbc.execute(sql);
+
+        return sql;
+    }
+
+    private EsUpdateDslParser.CommandContext parse(String dsl) {
+        var input = CharStreams.fromString(dsl);
+        var lexer = new EsUpdateDslLexer(input);
+        var tokens = new CommonTokenStream(lexer);
+        return new EsUpdateDslParser(tokens).command();
+    }
+}
