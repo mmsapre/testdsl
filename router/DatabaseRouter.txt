@@ -1,0 +1,25 @@
+package router;
+
+import org.springframework.stereotype.Component;
+import java.util.Map;
+
+@Component
+public class DatabaseRouter {
+
+    private final ConnectionRegistry registry;
+
+    public DatabaseRouter(ConnectionRegistry r) { this.registry = r; }
+
+    public org.springframework.jdbc.core.JdbcTemplate resolve(Map<String,Object> json) {
+        if (json.containsKey("connection"))
+            return registry.get(json.get("connection").toString());
+
+        if (json.containsKey("table")) {
+            String t = json.get("table").toString();
+            if (t.startsWith("trade_")) return registry.get("trades");
+            if (t.startsWith("acct_")) return registry.get("refdata");
+        }
+
+        return registry.get("default");
+    }
+}
