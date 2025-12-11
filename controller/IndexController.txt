@@ -1,0 +1,18 @@
+package controller;
+
+import com.dsl.service.IndexService;
+import lombok.RequiredArgsConstructor;
+import org.springframework.web.bind.annotation.*;
+
+@RestController
+@RequestMapping("/index")
+@RequiredArgsConstructor
+public class IndexController {
+
+    private final IndexService service;
+
+    @PostMapping
+    public String createOrDrop(@RequestBody String dsl) {
+        return service.execute(dsl);
+    }
+}
