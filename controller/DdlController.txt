@@ -1,0 +1,17 @@
+@RestController
+@RequestMapping("/ddl")
+@RequiredArgsConstructor
+public class DdlController {
+
+    private final DdlService service;
+
+    @PostMapping("/create")
+    public String create(@RequestBody String dsl) throws Exception {
+        return service.create(dsl);
+    }
+
+    @PostMapping("/alter")
+    public String alter(@RequestBody String dsl) throws Exception {
+        return service.alter(dsl);
+    }
+}
