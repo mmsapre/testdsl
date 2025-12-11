@@ -1,0 +1,12 @@
+@RestController
+@RequestMapping("/upsert")
+@RequiredArgsConstructor
+public class UpsertController {
+
+    private final UpsertService service;
+
+    @PostMapping
+    public String run(@RequestBody String dsl) throws Exception {
+        return service.execute(dsl);
+    }
+}
