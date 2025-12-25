@@ -1,0 +1,21 @@
+grammar Dsl;
+import Json;
+
+command
+  : PUT qualified WITH json
+  | POST qualified UPSERT WITH json
+  | POST qualified BULK WITH json
+  | POST qualified SEARCH WITH json
+  | POST qualified ALTER WITH json
+  | DELETE qualified DOC WITH json
+  | APPROVE qualified
+  ;
+
+qualified : ID '.' ID ;
+
+PUT:'PUT'; POST:'POST'; DELETE:'DELETE'; APPROVE:'APPROVE';
+UPSERT:'_upsert'; BULK:'_bulk'; SEARCH:'_search'; ALTER:'_alter'; DOC:'_doc';
+WITH:'WITH';
+
+ID : [a-zA-Z_][a-zA-Z0-9_]* ;
+WS : [ \t\r\n]+ -> skip ;
