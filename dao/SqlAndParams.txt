@@ -1,0 +1,28 @@
+package com.mmsapre.platform.sql;
+
+import java.util.Collections;
+import java.util.Map;
+
+/**
+ * Immutable carrier for SQL and named parameters.
+ *
+ * Used by:
+ *  - INSERT
+ *  - UPDATE
+ *  - SOFT DELETE
+ *  - SCD-2 EXPIRE
+ *
+ * Keeps SQL generation and execution cleanly separated.
+ */
+public record SqlAndParams(
+        String sql,
+        Map<String, Object> params
+) {
+
+    /**
+     * Safe empty params helper.
+     */
+    public static SqlAndParams of(String sql) {
+        return new SqlAndParams(sql, Collections.emptyMap());
+    }
+}
