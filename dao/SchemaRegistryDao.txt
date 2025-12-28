@@ -1,0 +1,160 @@
+package com.mmsapre.platform.registry;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.mmsapre.platform.util.JsonUtil;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Repository;
+
+import java.util.List;
+import java.util.Map;
+
+/**
+ * Schema Registry DAO
+ *
+ * Responsibilities:
+ *  - Maintain schema versions
+ *  - Maker–checker lifecycle (DRAFT → ACTIVE → INACTIVE)
+ *  - Provide active schema lookup at runtime
+ *
+ * This is the ONLY non-generic table in the system.
+ */
+@Repository
+public class SchemaRegistryDao {
+
+    /* =========================================================
+       BOOTSTRAP
+     ========================================================= */
+
+    public void ensure(JdbcTemplate jdbc) {
+        jdbc.execute("""
+            CREATE TABLE IF NOT EXISTS schema_registry (
+                id          BIGSERIAL PRIMARY KEY,
+                table_name  TEXT NOT NULL,
+                version     INT  NOT NULL,
+                status      TEXT NOT NULL,   -- DRAFT | ACTIVE | INACTIVE
+                schema_json JSONB NOT NULL,
+                created_at  TIMESTAMP DEFAULT now()
+            )
+        """);
+
+        jdbc.execute("""
+            CREATE INDEX IF NOT EXISTS idx_schema_registry_lookup
+            ON schema_registry(table_name, status, version)
+        """);
+    }
+
+    /* =========================================================
+       VERSIONING
+     ========================================================= */
+
+    public int nextVersion(JdbcTemplate jdbc, String table) {
+        Integer v = jdbc.queryForObject(
+            "SELECT COALESCE(MAX(version),0) FROM schema_registry WHERE table_name = ?",
+            Integer.class,
+            table
+        );
+        return (v == null ? 1 : v + 1);
+    }
+
+    /* =========================================================
+       DRAFT
+     ========================================================= */
+
+    public void saveDraft(
+            JdbcTemplate jdbc,
+            String table,
+            int version,
+            JsonNode schema
+    ) {
+        jdbc.update("""
+            INSERT INTO schema_registry(table_name, version, status, schema_json)
+            VALUES (?, ?, 'DRAFT', ?::jsonb)
+        """,
+        table,
+        version,
+        JsonUtil.pretty(schema)
+        );
+    }
+
+    public Map<String, Object> latestDraft(JdbcTemplate jdbc, String table) {
+        List<Map<String, Object>> rows = jdbc.queryForList("""
+            SELECT *
+            FROM schema_registry
+            WHERE table_name = ?
+              AND status = 'DRAFT'
+            ORDER BY version DESC
+            LIMIT 1
+        """, table);
+
+        return rows.isEmpty() ? null : rows.get(0);
+    }
+
+    /* =========================================================
+       ACTIVATE / DEACTIVATE
+     ========================================================= */
+
+    public void activate(JdbcTemplate jdbc, String table, int version) {
+
+        // deactivate existing active
+        jdbc.update("""
+            UPDATE schema_registry
+            SET status = 'INACTIVE'
+            WHERE table_name = ?
+              AND status = 'ACTIVE'
+        """, table);
+
+        // activate new
+        jdbc.update("""
+            UPDATE schema_registry
+            SET status = 'ACTIVE'
+            WHERE table_name = ?
+              AND version = ?
+        """, table, version);
+    }
+
+    /* =========================================================
+       RUNTIME LOOKUPS
+     ========================================================= */
+
+    public Map<String, Object> active(JdbcTemplate jdbc, String table) {
+        List<Map<String, Object>> rows = jdbc.queryForList("""
+            SELECT *
+            FROM schema_registry
+            WHERE table_name = ?
+              AND status = 'ACTIVE'
+            ORDER BY version DESC
+            LIMIT 1
+        """, table);
+
+        if (rows.isEmpty()) {
+            throw new IllegalStateException(
+                "No ACTIVE schema found for table: " + table
+            );
+        }
+        return rows.get(0);
+    }
+
+    public boolean hasActive(JdbcTemplate jdbc, String table) {
+        Integer c = jdbc.queryForObject("""
+            SELECT COUNT(*)
+            FROM schema_registry
+            WHERE table_name = ?
+              AND status = 'ACTIVE'
+        """, Integer.class, table);
+
+        return c != null && c > 0;
+    }
+
+    /* =========================================================
+       LISTING / DEBUG (OPTIONAL)
+     ========================================================= */
+
+    public List<Map<String, Object>> list(JdbcTemplate jdbc, String table) {
+        return jdbc.queryForList("""
+            SELECT table_name, version, status, created_at
+            FROM schema_registry
+            WHERE table_name = ?
+            ORDER BY version DESC
+        """, table);
+    }
+}
