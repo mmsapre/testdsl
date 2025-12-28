@@ -1,0 +1,144 @@
+package com.mmsapre.platform.sql;
+
+import com.fasterxml.jackson.databind.JsonNode;
+
+import java.util.*;
+
+/**
+ * Builds SQL aggregations similar to Elasticsearch aggregations.
+ *
+ * Supported:
+ *  - terms
+ *  - count
+ *  - sum
+ *  - avg
+ *  - min
+ *  - max
+ *
+ * Works with:
+ *  - SCD-2 active filtering
+ *  - Generic tables
+ *  - Multi-tenant schemas
+ */
+public final class AggregationSqlBuilder {
+
+    private AggregationSqlBuilder() {}
+
+    /* =========================================================
+       ENTRY POINT
+     ========================================================= */
+
+    /**
+     * Example aggs:
+     *
+     * {
+     *   "by_status": {
+     *     "terms": { "field": "status" },
+     *     "aggs": {
+     *       "total_amount": { "sum": { "field": "amount" } }
+     *     }
+     *   }
+     * }
+     */
+    public static String build(
+            String table,
+            JsonNode aggs,
+            boolean scd2,
+            String activeFlag
+    ) {
+        List<String> select = new ArrayList<>();
+        List<String> groupBy = new ArrayList<>();
+
+        buildAggs(aggs, select, groupBy);
+
+        String where =
+                scd2 ? "WHERE " + activeFlag + " = TRUE" : "";
+
+        return """
+            SELECT %s
+            FROM %s
+            %s
+            %s
+            """.formatted(
+                String.join(", ", select),
+                table,
+                where,
+                groupBy.isEmpty()
+                    ? ""
+                    : "GROUP BY " + String.join(", ", groupBy)
+        );
+    }
+
+    /* =========================================================
+       AGG REGISTRY
+     ========================================================= */
+
+    private static void buildAggs(
+            JsonNode aggs,
+            List<String> select,
+            List<String> groupBy
+    ) {
+        aggs.fields().forEachRemaining(entry -> {
+            String name = entry.getKey();
+            JsonNode body = entry.getValue();
+
+            if (body.has("terms")) {
+                handleTerms(name, body, select, groupBy);
+            } else if (body.has("count")) {
+                handleMetric(name, body.get("count"), "COUNT", select);
+            } else if (body.has("sum")) {
+                handleMetric(name, body.get("sum"), "SUM", select);
+            } else if (body.has("avg")) {
+                handleMetric(name, body.get("avg"), "AVG", select);
+            } else if (body.has("min")) {
+                handleMetric(name, body.get("min"), "MIN", select);
+            } else if (body.has("max")) {
+                handleMetric(name, body.get("max"), "MAX", select);
+            } else {
+                throw new IllegalArgumentException(
+                    "Unsupported aggregation: " + name
+                );
+            }
+        });
+    }
+
+    /* =========================================================
+       TERMS AGG
+     ========================================================= */
+
+    private static void handleTerms(
+            String name,
+            JsonNode body,
+            List<String> select,
+            List<String> groupBy
+    ) {
+        JsonNode terms = body.get("terms");
+        String field = terms.get("field").asText();
+
+        select.add(field + " AS " + name);
+        groupBy.add(field);
+
+        // Nested aggregations
+        if (body.has("aggs")) {
+            buildAggs(body.get("aggs"), select, groupBy);
+        }
+    }
+
+    /* =========================================================
+       METRICS
+     ========================================================= */
+
+    private static void handleMetric(
+            String name,
+            JsonNode metric,
+            String fn,
+            List<String> select
+    ) {
+        String field =
+                metric.has("field")
+                        ? metric.get("field").asText()
+                        : "*";
+
+        select.add(fn + "(" + field + ") AS " + name);
+    }
+}
