@@ -1,0 +1,133 @@
+package com.mmsapre.platform.util;
+
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.*;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+
+import java.util.Iterator;
+import java.util.LinkedHashMap;
+import java.util.Map;
+
+/**
+ * Central JSON helper used across the platform.
+ *
+ * Responsibilities:
+ *  - Parse JSON safely
+ *  - Provide shared ObjectMapper
+ *  - Convert JsonNode -> Map for NamedParameterJdbcTemplate
+ *  - Extract fields dynamically (no domain logic)
+ */
+public final class JsonUtil {
+
+    private static final ObjectMapper OM = new ObjectMapper()
+            .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
+            .configure(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS, false);
+
+    private JsonUtil() {}
+
+    /* =========================================================
+       Core helpers
+     ========================================================= */
+
+    public static ObjectMapper om() {
+        return OM;
+    }
+
+    /**
+     * Parse JSON string into JsonNode
+     */
+    public static JsonNode parse(String json) {
+        try {
+            return OM.readTree(json);
+        } catch (Exception e) {
+            throw new IllegalArgumentException("Invalid JSON payload", e);
+        }
+    }
+
+    /**
+     * Convert JsonNode into Map<String, Object>
+     * Preserves order for SQL generation.
+     */
+    public static Map<String, Object> toMap(JsonNode node) {
+        Map<String, Object> map = new LinkedHashMap<>();
+        if (node == null || !node.isObject()) {
+            return map;
+        }
+        node.fields().forEachRemaining(e ->
+                map.put(e.getKey(), unwrap(e.getValue()))
+        );
+        return map;
+    }
+
+    /**
+     * Deep unwrap JsonNode -> Java Object
+     */
+    public static Object unwrap(JsonNode n) {
+        if (n == null || n.isNull()) return null;
+        if (n.isTextual()) return n.asText();
+        if (n.isInt()) return n.intValue();
+        if (n.isLong()) return n.longValue();
+        if (n.isDouble() || n.isFloat()) return n.doubleValue();
+        if (n.isBoolean()) return n.booleanValue();
+        if (n.isArray() || n.isObject()) {
+            try {
+                return OM.writeValueAsString(n);
+            } catch (JsonProcessingException e) {
+                throw new RuntimeException(e);
+            }
+        }
+        return n.asText();
+    }
+
+    /* =========================================================
+       JSON construction helpers
+     ========================================================= */
+
+    public static ObjectNode object() {
+        return OM.createObjectNode();
+    }
+
+    public static ObjectNode object(Map<String, Object> values) {
+        ObjectNode node = object();
+        values.forEach((k, v) -> node.set(k, OM.valueToTree(v)));
+        return node;
+    }
+
+    /* =========================================================
+       Utility helpers
+     ========================================================= */
+
+    /**
+     * Extract subset of fields from a JsonNode
+     */
+    public static Map<String, Object> extract(JsonNode node, Iterable<String> fields) {
+        Map<String, Object> map = new LinkedHashMap<>();
+        for (String f : fields) {
+            JsonNode v = node.get(f);
+            map.put(f, unwrap(v));
+        }
+        return map;
+    }
+
+    /**
+     * Merge two JsonNodes (right overrides left)
+     */
+    public static JsonNode merge(JsonNode left, JsonNode right) {
+        ObjectNode merged = left.deepCopy();
+        right.fields().forEachRemaining(e ->
+                merged.set(e.getKey(), e.getValue())
+        );
+        return merged;
+    }
+
+    /**
+     * Pretty print (debug / logs)
+     */
+    public static String pretty(JsonNode node) {
+        try {
+            return OM.writerWithDefaultPrettyPrinter().writeValueAsString(node);
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException(e);
+        }
+    }
+}
