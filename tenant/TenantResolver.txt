@@ -1,0 +1,38 @@
+package com.mmsapre.platform.tenant;
+
+import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.stereotype.Component;
+
+/**
+ * Resolves tenant context from incoming request.
+ *
+ * Resolution order:
+ *  1. X-Tenant-Id header
+ *  2. tenant query param
+ */
+@Component
+public class TenantResolver {
+
+    public TenantContext resolve(HttpServletRequest request) {
+
+        String tenantId = request.getHeader("X-Tenant-Id");
+        if (tenantId == null || tenantId.isBlank()) {
+            tenantId = request.getParameter("tenant");
+        }
+
+        if (tenantId == null || tenantId.isBlank()) {
+            throw new IllegalArgumentException("Tenant not provided");
+        }
+
+        /*
+         * Mapping strategy:
+         *  - same DB alias
+         *  - separate schema per tenant
+         */
+        return new TenantContext(
+                tenantId,
+                "pg_main",      // datasource alias
+                tenantId        // schema name
+        );
+    }
+}
