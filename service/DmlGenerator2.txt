@@ -1,0 +1,161 @@
+package com.mmsapre.platform.sql;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.mmsapre.platform.util.JsonUtil;
+
+import java.util.*;
+
+/**
+ * Generates DML SQL (INSERT / UPDATE / DELETE / SELECT).
+ *
+ * Absolutely generic:
+ *  - no table assumptions
+ *  - no column assumptions
+ *  - schema-driven only
+ */
+public final class DmlGenerator {
+
+    private DmlGenerator() {}
+
+    /* =========================================================
+       INSERT
+     ========================================================= */
+
+    public static SqlAndParams insert(
+            String table,
+            JsonNode record,
+            String hash
+    ) {
+        Map<String, Object> params = new LinkedHashMap<>();
+        List<String> cols = new ArrayList<>();
+        List<String> vals = new ArrayList<>();
+
+        record.fields().forEachRemaining(e -> {
+            cols.add(e.getKey());
+            vals.add(":" + e.getKey());
+            params.put(e.getKey(), JsonUtil.unwrap(e.getValue()));
+        });
+
+        // hash_key
+        cols.add("hash_key");
+        vals.add(":hash_key");
+        params.put("hash_key", hash);
+
+        String sql = """
+            INSERT INTO %s (%s)
+            VALUES (%s)
+            """.formatted(
+                table,
+                String.join(",", cols),
+                String.join(",", vals)
+            );
+
+        return new SqlAndParams(sql, params);
+    }
+
+    /* =========================================================
+       SCD-2 EXPIRE ACTIVE ROWS
+     ========================================================= */
+
+    public static SqlAndParams expireActive(
+            String table,
+            JsonNode businessKey,
+            String activeFlag,
+            String endCol
+    ) {
+        Map<String, Object> params = new LinkedHashMap<>();
+        List<String> where = new ArrayList<>();
+
+        businessKey.fields().forEachRemaining(e -> {
+            where.add(e.getKey() + " = :" + e.getKey());
+            params.put(e.getKey(), JsonUtil.unwrap(e.getValue()));
+        });
+
+        String sql = """
+            UPDATE %s
+            SET %s = FALSE,
+                %s = now()
+            WHERE %s
+              AND %s = TRUE
+            """.formatted(
+                table,
+                activeFlag,
+                endCol,
+                String.join(" AND ", where),
+                activeFlag
+            );
+
+        return new SqlAndParams(sql, params);
+    }
+
+    /* =========================================================
+       SOFT DELETE (SCD-2)
+     ========================================================= */
+
+    public static SqlAndParams softDelete(
+            String table,
+            JsonNode businessKey,
+            boolean scd2,
+            String activeFlag,
+            String endCol
+    ) {
+        if (!scd2) {
+            throw new IllegalStateException(
+                "Soft delete requires SCD-2 enabled table"
+            );
+        }
+        return expireActive(table, businessKey, activeFlag, endCol);
+    }
+
+    /* =========================================================
+       SELECT (ES-STYLE SEARCH)
+     ========================================================= */
+
+    public static String selectHitsSql(
+            String table,
+            JsonNode where,
+            boolean scd2,
+            String activeFlag,
+            String validFrom,
+            String validTo,
+            String asOf,
+            int size,
+            int from
+    ) {
+        List<String> clauses = new ArrayList<>();
+
+        if (where != null && where.isObject()) {
+            where.fields().forEachRemaining(e ->
+                clauses.add(e.getKey() + " = :" + e.getKey())
+            );
+        }
+
+        if (scd2) {
+            if (asOf != null) {
+                clauses.add(
+                    "timestamp :as_of BETWEEN " +
+                    validFrom + " AND " + validTo
+                );
+            } else {
+                clauses.add(activeFlag + " = TRUE");
+            }
+        }
+
+        String sql = """
+            SELECT *
+            FROM %s
+            %s
+            ORDER BY _row_id DESC
+            LIMIT %d OFFSET %d
+            """.formatted(
+                table,
+                clauses.isEmpty()
+                    ? ""
+                    : "WHERE " + String.join(" AND ", clauses),
+                size,
+                from
+            );
+
+        return sql;
+    }
+}
