@@ -1,0 +1,10 @@
+package com.mmsapre.platform.tenant;
+
+/**
+ * Resolved tenant execution context.
+ */
+public record TenantContext(
+        String tenantId,
+        String alias,
+        String schema
+) {}
