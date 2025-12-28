@@ -1,0 +1,126 @@
+package com.mmsapre.platform.api;
+
+import com.mmsapre.platform.service.DslExecutionService;
+import com.mmsapre.platform.tenant.MultiTenantJdbcResolver;
+import com.mmsapre.platform.tenant.TenantContext;
+import com.mmsapre.platform.tenant.TenantResolver;
+import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+/**
+ * Generic ES-style controller with multi-tenant support.
+ */
+@RestController
+@RequestMapping("/")
+public class DslController {
+
+    private final DslExecutionService service;
+    private final TenantResolver tenantResolver;
+    private final MultiTenantJdbcResolver tenantJdbcResolver;
+
+    public DslController(
+            DslExecutionService service,
+            TenantResolver tenantResolver,
+            MultiTenantJdbcResolver tenantJdbcResolver
+    ) {
+        this.service = service;
+        this.tenantResolver = tenantResolver;
+        this.tenantJdbcResolver = tenantJdbcResolver;
+    }
+
+    /* =========================================================
+       CREATE TABLE (DRAFT)
+     ========================================================= */
+
+    @PutMapping("/{alias}/{table}")
+    public ResponseEntity<?> create(
+            HttpServletRequest request,
+            @PathVariable String alias,
+            @PathVariable String table,
+            @RequestBody String body
+    ) {
+        TenantContext ctx = tenantResolver.resolve(request);
+        String dsl = "PUT " + ctx.alias() + "." + table + " WITH " + body;
+        return ResponseEntity.ok(service.exec(dsl));
+    }
+
+    /* =========================================================
+       APPROVE (Maker–Checker)
+     ========================================================= */
+
+    @PostMapping("/{alias}/{table}/_approve")
+    public ResponseEntity<?> approve(
+            HttpServletRequest request,
+            @PathVariable String alias,
+            @PathVariable String table
+    ) {
+        TenantContext ctx = tenantResolver.resolve(request);
+        String dsl = "APPROVE " + ctx.alias() + "." + table;
+        return ResponseEntity.ok(service.exec(dsl));
+    }
+
+    /* =========================================================
+       UPSERT
+     ========================================================= */
+
+    @PostMapping("/{alias}/{table}/_upsert")
+    public ResponseEntity<?> upsert(
+            HttpServletRequest request,
+            @PathVariable String alias,
+            @PathVariable String table,
+            @RequestBody String body
+    ) {
+        TenantContext ctx = tenantResolver.resolve(request);
+        String dsl = "POST " + ctx.alias() + "." + table + " _upsert WITH " + body;
+        return ResponseEntity.ok(service.exec(dsl));
+    }
+
+    /* =========================================================
+       BULK
+     ========================================================= */
+
+    @PostMapping("/{alias}/{table}/_bulk")
+    public ResponseEntity<?> bulk(
+            HttpServletRequest request,
+            @PathVariable String alias,
+            @PathVariable String table,
+            @RequestBody String body
+    ) {
+        TenantContext ctx = tenantResolver.resolve(request);
+        String dsl = "POST " + ctx.alias() + "." + table + " _bulk WITH " + body;
+        return ResponseEntity.ok(service.exec(dsl));
+    }
+
+    /* =========================================================
+       SEARCH
+     ========================================================= */
+
+    @PostMapping("/{alias}/{table}/_search")
+    public ResponseEntity<?> search(
+            HttpServletRequest request,
+            @PathVariable String alias,
+            @PathVariable String table,
+            @RequestBody String body
+    ) {
+        TenantContext ctx = tenantResolver.resolve(request);
+        String dsl = "POST " + ctx.alias() + "." + table + " _search WITH " + body;
+        return ResponseEntity.ok(service.exec(dsl));
+    }
+
+    /* =========================================================
+       SOFT DELETE
+     ========================================================= */
+
+    @DeleteMapping("/{alias}/{table}/_doc")
+    public ResponseEntity<?> delete(
+            HttpServletRequest request,
+            @PathVariable String alias,
+            @PathVariable String table,
+            @RequestBody String body
+    ) {
+        TenantContext ctx = tenantResolver.resolve(request);
+        String dsl = "DELETE " + ctx.alias() + "." + table + " _doc WITH " + body;
+        return ResponseEntity.ok(service.exec(dsl));
+    }
+}
