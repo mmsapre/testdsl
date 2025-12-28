@@ -1,0 +1,317 @@
+package com.mmsapre.platform.service;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.mmsapre.dsl.DslCommand;
+import com.mmsapre.dsl.DslParserFacade;
+import com.mmsapre.platform.registry.SchemaRegistryDao;
+import com.mmsapre.platform.sql.*;
+import com.mmsapre.platform.util.JsonUtil;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
+import org.springframework.stereotype.Service;
+
+import java.time.Instant;
+import java.util.Map;
+
+/**
+ * Central execution engine for all DSL commands.
+ *
+ * Responsibilities:
+ *  - Parse DSL
+ *  - Resolve ACTIVE schema
+ *  - Enforce maker-checker
+ *  - Execute DDL / DML / BULK
+ *  - Enforce SCD-2 + dedupe
+ *
+ * NO domain logic.
+ */
+@Service
+public class DslExecutionService {
+
+    private final DslParserFacade parser = new DslParserFacade();
+
+    private final JdbcResolver jdbcResolver;
+    private final SchemaRegistryDao registryDao;
+    private final BulkService bulkService;
+    private final HashService hashService;
+
+    public DslExecutionService(
+            JdbcResolver jdbcResolver,
+            SchemaRegistryDao registryDao,
+            BulkService bulkService,
+            HashService hashService
+    ) {
+        this.jdbcResolver = jdbcResolver;
+        this.registryDao = registryDao;
+        this.bulkService = bulkService;
+        this.hashService = hashService;
+    }
+
+    /* =========================================================
+       ENTRY POINT
+     ========================================================= */
+
+    public Object exec(String dsl) {
+        DslCommand cmd = parser.parse(dsl);
+        return execute(cmd);
+    }
+
+    private Object execute(DslCommand cmd) {
+
+        JdbcTemplate jdbc = jdbcResolver.jdbc(cmd.alias());
+        registryDao.ensure(jdbc);
+
+        return switch (cmd.type()) {
+            case CREATE  -> createDraft(jdbc, cmd.table(), cmd.json());
+            case ALTER   -> alterDraft(jdbc, cmd.table(), cmd.json());
+            case APPROVE -> approve(jdbc, cmd.table());
+
+            case UPSERT  -> upsert(jdbc, cmd.table(), cmd.json());
+            case BULK    -> bulk(jdbc, cmd.table(), cmd.json());
+
+            case SEARCH  -> search(jdbc, cmd.table(), cmd.json());
+            case DELETE  -> softDelete(jdbc, cmd.table(), cmd.json());
+        };
+    }
+
+    /* =========================================================
+       CREATE / ALTER (DRAFT)
+     ========================================================= */
+
+    private Object createDraft(JdbcTemplate jdbc, String table, String json) {
+
+        JsonNode schema = JsonUtil.parse(json);
+        int version = registryDao.nextVersion(jdbc, table);
+
+        registryDao.saveDraft(jdbc, table, version, schema);
+
+        return Map.of(
+                "status", "DRAFT",
+                "table", table,
+                "version", version
+        );
+    }
+
+    private Object alterDraft(JdbcTemplate jdbc, String table, String json) {
+
+        JsonNode schema = JsonUtil.parse(json);
+        int version = registryDao.nextVersion(jdbc, table);
+
+        registryDao.saveDraft(jdbc, table, version, schema);
+
+        return Map.of(
+                "status", "DRAFT",
+                "table", table,
+                "version", version
+        );
+    }
+
+    /* =========================================================
+       APPROVE (CREATE PHYSICAL TABLE)
+     ========================================================= */
+
+    private Object approve(JdbcTemplate jdbc, String table) {
+
+        Map<String, Object> draft = registryDao.latestDraft(jdbc, table);
+        if (draft == null) {
+            throw new IllegalStateException("No DRAFT schema found for " + table);
+        }
+
+        int version = (int) draft.get("version");
+        JsonNode schema =
+                JsonUtil.parse(draft.get("schema_json").toString());
+
+        String physical = DdlGenerator.physicalTable(table, version);
+
+        for (String ddl : DdlGenerator.createTableAndIndexes(physical, schema)) {
+            jdbc.execute(ddl);
+        }
+
+        registryDao.activate(jdbc, table, version);
+
+        return Map.of(
+                "status", "ACTIVE",
+                "table", table,
+                "physical_table", physical,
+                "version", version
+        );
+    }
+
+    /* =========================================================
+       UPSERT (SCD-2 + DEDUP)
+     ========================================================= */
+
+    private Object upsert(JdbcTemplate jdbc, String table, String json) {
+
+        JsonNode payload = JsonUtil.parse(json);
+        JsonNode record = payload.get("record");
+        JsonNode businessKey = payload.get("business_key");
+
+        Map<String, Object> active = registryDao.active(jdbc, table);
+        JsonNode schema =
+                JsonUtil.parse(active.get("schema_json").toString());
+
+        int version = (int) active.get("version");
+        String physical = DdlGenerator.physicalTable(table, version);
+
+        boolean scd2 = schema.path("scd").path("type").asInt(0) == 2;
+        String activeFlag = schema.path("scd")
+                .path("active_flag").asText("is_active");
+        String endCol = schema.path("scd")
+                .path("end_date").asText("valid_to");
+
+        // 1️⃣ Compute dedup hash
+        String hash = hashService.computeHash(
+                record,
+                schema.path("hash_keys")
+        );
+
+        // 2️⃣ Expire active row (SCD-2)
+        if (scd2) {
+            SqlAndParams expire =
+                    DmlGenerator.expireActive(
+                            physical,
+                            businessKey,
+                            activeFlag,
+                            endCol
+                    );
+            new NamedParameterJdbcTemplate(jdbc)
+                    .update(expire.sql(), expire.params());
+        }
+
+        // 3️⃣ Insert new row
+        SqlAndParams insert =
+                DmlGenerator.insert(physical, record, hash);
+
+        new NamedParameterJdbcTemplate(jdbc)
+                .update(insert.sql(), insert.params());
+
+        return Map.of(
+                "status", "UPSERT_OK",
+                "hash_key", hash
+        );
+    }
+
+    /* =========================================================
+       BULK (CSV / JSON → COPY)
+     ========================================================= */
+
+    private Object bulk(JdbcTemplate jdbc, String table, String json) {
+
+        JsonNode payload = JsonUtil.parse(json);
+
+        Map<String, Object> active = registryDao.active(jdbc, table);
+        JsonNode schema =
+                JsonUtil.parse(active.get("schema_json").toString());
+
+        int version = (int) active.get("version");
+
+        try {
+            int inserted =
+                    bulkService.bulkCopyFromCsv(
+                            jdbc,
+                            table,
+                            version,
+                            schema,
+                            payload
+                    );
+            return Map.of("inserted", inserted);
+        } catch (Exception e) {
+            throw new RuntimeException("Bulk COPY failed", e);
+        }
+    }
+
+    /* =========================================================
+       SEARCH + AGGREGATIONS
+     ========================================================= */
+
+    private Object search(JdbcTemplate jdbc, String table, String json) {
+
+        JsonNode payload = JsonUtil.parse(json);
+        JsonNode query = payload.path("query");
+        JsonNode aggs = payload.get("aggs");
+
+        Map<String, Object> active = registryDao.active(jdbc, table);
+        JsonNode schema =
+                JsonUtil.parse(active.get("schema_json").toString());
+
+        int version = (int) active.get("version");
+        String physical = DdlGenerator.physicalTable(table, version);
+
+        boolean scd2 = schema.path("scd").path("type").asInt(0) == 2;
+        String activeFlag = schema.path("scd")
+                .path("active_flag").asText("is_active");
+
+        // Aggregations
+        if (aggs != null && aggs.isObject()) {
+            String sql =
+                    AggregationSqlBuilder.build(
+                            physical,
+                            aggs,
+                            scd2,
+                            activeFlag
+                    );
+            return jdbc.queryForList(sql);
+        }
+
+        // Hits
+        String sql =
+                DmlGenerator.selectHitsSql(
+                        physical,
+                        query,
+                        scd2,
+                        activeFlag,
+                        "valid_from",
+                        "valid_to",
+                        payload.path("as_of").asText(null),
+                        payload.path("size").asInt(10),
+                        payload.path("from").asInt(0)
+                );
+
+        return new NamedParameterJdbcTemplate(jdbc)
+                .queryForList(
+                        sql,
+                        JsonUtil.om().convertValue(query, Map.class)
+                );
+    }
+
+    /* =========================================================
+       SOFT DELETE (SCD-2)
+     ========================================================= */
+
+    private Object softDelete(JdbcTemplate jdbc, String table, String json) {
+
+        JsonNode payload = JsonUtil.parse(json);
+        JsonNode businessKey = payload.get("business_key");
+
+        Map<String, Object> active = registryDao.active(jdbc, table);
+        JsonNode schema =
+                JsonUtil.parse(active.get("schema_json").toString());
+
+        int version = (int) active.get("version");
+        String physical = DdlGenerator.physicalTable(table, version);
+
+        boolean scd2 = schema.path("scd").path("type").asInt(0) == 2;
+        String activeFlag = schema.path("scd")
+                .path("active_flag").asText("is_active");
+        String endCol = schema.path("scd")
+                .path("end_date").asText("valid_to");
+
+        SqlAndParams sql =
+                DmlGenerator.softDelete(
+                        physical,
+                        businessKey,
+                        scd2,
+                        activeFlag,
+                        endCol
+                );
+
+        new NamedParameterJdbcTemplate(jdbc)
+                .update(sql.sql(), sql.params());
+
+        return Map.of(
+                "deleted", true,
+                "timestamp", Instant.now()
+        );
+    }
+}
