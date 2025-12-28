@@ -1,0 +1,20 @@
+@Configuration
+@ConfigurationProperties(prefix = "datasources")
+public class AliasDataSourceConfig {
+
+    @Bean
+    public Map<String, DataSource> aliasDataSources() {
+        return new HashMap<>();
+    }
+
+    @Bean
+    public Map<String, JdbcTemplate> aliasJdbcTemplates(
+            Map<String, DataSource> aliasDataSources
+    ) {
+        Map<String, JdbcTemplate> map = new HashMap<>();
+        for (Map.Entry<String, DataSource> e : aliasDataSources.entrySet()) {
+            map.put(e.getKey(), new JdbcTemplate(e.getValue()));
+        }
+        return map;
+    }
+}
