@@ -1,0 +1,177 @@
+package com.mmsapre.platform.service;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.mmsapre.platform.sql.DdlGenerator;
+import com.mmsapre.platform.util.JsonUtil;
+import org.postgresql.PGConnection;
+import org.postgresql.copy.CopyManager;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Service;
+
+import java.io.StringReader;
+import java.sql.Connection;
+import java.util.*;
+
+/**
+ * Bulk ingestion service using PostgreSQL COPY FROM STDIN.
+ *
+ * Supports:
+ *  - CSV payloads from API
+ *  - Hash-based deduplication
+ *  - SCD-2 expiration
+ *  - Generic tables / columns
+ *
+ * IMPORTANT:
+ *  - Schema (search_path) must already be set
+ *  - Unique index on (hash_key) WHERE is_active=true guarantees dedup
+ */
+@Service
+public class BulkService {
+
+    private final HashService hashService;
+
+    public BulkService(HashService hashService) {
+        this.hashService = hashService;
+    }
+
+    /* =========================================================
+       ENTRY POINT (CSV)
+     ========================================================= */
+
+    /**
+     * Payload format expected:
+     *
+     * {
+     *   "format": "csv",
+     *   "header": true,
+     *   "csv": "col1,col2\nv1,v2\nv3,v4"
+     * }
+     */
+    public int bulkCopyFromCsv(
+            JdbcTemplate jdbc,
+            String logicalTable,
+            int version,
+            JsonNode schema,
+            JsonNode payload
+    ) throws Exception {
+
+        if (!payload.has("csv")) {
+            throw new IllegalArgumentException("csv field missing in payload");
+        }
+
+        boolean header = payload.path("header").asBoolean(true);
+        String csv = payload.get("csv").asText();
+
+        // Physical table name
+        String table = DdlGenerator.physicalTable(logicalTable, version);
+
+        // Column order from schema
+        List<String> columns = new ArrayList<>();
+        schema.path("columns").fieldNames().forEachRemaining(columns::add);
+
+        boolean hasHash = schema.has("hash_keys");
+        boolean scd2 = schema.path("scd").path("type").asInt(0) == 2;
+
+        if (hasHash) columns.add("hash_key");
+
+        // Enrich CSV with hash_key column if required
+        String finalCsv =
+                hasHash
+                        ? appendHashColumn(csv, header, schema.path("hash_keys"))
+                        : csv;
+
+        return doCopy(jdbc, table, columns, finalCsv, header);
+    }
+
+    /* =========================================================
+       COPY EXECUTION
+     ========================================================= */
+
+    private int doCopy(
+            JdbcTemplate jdbc,
+            String table,
+            List<String> columns,
+            String csv,
+            boolean header
+    ) throws Exception {
+
+        return jdbc.execute((Connection con) -> {
+            PGConnection pg = con.unwrap(PGConnection.class);
+            CopyManager copyManager = pg.getCopyAPI();
+
+            String sql = """
+                COPY %s (%s)
+                FROM STDIN WITH (
+                  FORMAT csv,
+                  HEADER %s,
+                  DELIMITER ','
+                )
+                """.formatted(
+                    table,
+                    String.join(",", columns),
+                    header ? "true" : "false"
+                );
+
+            return (int) copyManager.copyIn(
+                    sql,
+                    new StringReader(csv)
+            );
+        });
+    }
+
+    /* =========================================================
+       HASH ENRICHMENT
+     ========================================================= */
+
+    /**
+     * Adds hash_key column to CSV content.
+     *
+     * Input:
+     *   a,b
+     *   1,2
+     *
+     * Output:
+     *   a,b,hash_key
+     *   1,2,abc123
+     */
+    private String appendHashColumn(
+            String csv,
+            boolean header,
+            JsonNode hashKeys
+    ) {
+
+        String[] lines = csv.split("\\R");
+        StringBuilder out = new StringBuilder();
+
+        String[] headerCols = null;
+        int start = 0;
+
+        if (header) {
+            headerCols = lines[0].split(",");
+            out.append(lines[0]).append(",hash_key\n");
+            start = 1;
+        }
+
+        for (int i = start; i < lines.length; i++) {
+            String line = lines[i].trim();
+            if (line.isEmpty()) continue;
+
+            String[] values = line.split(",", -1);
+            Map<String, Object> row = new LinkedHashMap<>();
+
+            for (int j = 0; j < headerCols.length; j++) {
+                row.put(headerCols[j], values[j]);
+            }
+
+            String hash =
+                    hashService.computeHash(
+                            JsonUtil.object(row),
+                            hashKeys
+                    );
+
+            out.append(line).append(",").append(hash).append("\n");
+        }
+
+        return out.toString();
+    }
+}
