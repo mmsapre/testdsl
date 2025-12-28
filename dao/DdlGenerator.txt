@@ -1,0 +1,166 @@
+package com.mmsapre.platform.sql;
+
+import com.fasterxml.jackson.databind.JsonNode;
+
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
+
+/**
+ * Generates PostgreSQL DDL statements from schema JSON.
+ *
+ * Responsibilities:
+ *  - CREATE TABLE
+ *  - ADD SCD-2 columns
+ *  - ADD hash-based dedup index
+ *  - ADD normal indexes
+ *
+ * Absolutely NO domain logic.
+ */
+public final class DdlGenerator {
+
+    private DdlGenerator() {}
+
+    /* =========================================================
+       Public entry
+     ========================================================= */
+
+    public static List<String> createTableAndIndexes(
+            String physicalTable,
+            JsonNode schema
+    ) {
+        List<String> ddl = new ArrayList<>();
+
+        ddl.add(createTableSql(physicalTable, schema));
+        ddl.addAll(createIndexesSql(physicalTable, schema));
+
+        return ddl;
+    }
+
+    /* =========================================================
+       CREATE TABLE
+     ========================================================= */
+
+    private static String createTableSql(
+            String table,
+            JsonNode schema
+    ) {
+        StringBuilder sb = new StringBuilder();
+
+        sb.append("CREATE TABLE IF NOT EXISTS ")
+          .append(table)
+          .append(" (\n");
+
+        // internal row id
+        sb.append("  _row_id BIGSERIAL PRIMARY KEY,\n");
+
+        // dynamic columns
+        JsonNode columns = schema.path("columns");
+        Iterator<String> names = columns.fieldNames();
+        while (names.hasNext()) {
+            String col = names.next();
+            JsonNode def = columns.get(col);
+            sb.append("  ")
+              .append(col)
+              .append(" ")
+              .append(pgType(def))
+              .append(",\n");
+        }
+
+        // hash key (for dedup)
+        if (schema.has("hash_keys")) {
+            sb.append("  hash_key TEXT,\n");
+        }
+
+        // SCD-2
+        JsonNode scd = schema.path("scd");
+        if (scd.path("type").asInt(0) == 2) {
+            sb.append("  is_active BOOLEAN NOT NULL DEFAULT TRUE,\n");
+            sb.append("  valid_from TIMESTAMP NOT NULL DEFAULT now(),\n");
+            sb.append("  valid_to   TIMESTAMP NOT NULL DEFAULT '9999-12-31',\n");
+        }
+
+        sb.append("  created_at TIMESTAMP DEFAULT now()\n");
+        sb.append(");");
+
+        return sb.toString();
+    }
+
+    /* =========================================================
+       INDEXES
+     ========================================================= */
+
+    private static List<String> createIndexesSql(
+            String table,
+            JsonNode schema
+    ) {
+        List<String> ddl = new ArrayList<>();
+
+        // primary / unique keys
+        if (schema.has("primary_key")) {
+            ddl.add(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_" + table + "_pk ON " +
+                table + "(" + join(schema.get("primary_key")) + ")"
+            );
+        }
+
+        // hash-based dedup index (CRITICAL)
+        if (schema.has("hash_keys")) {
+            ddl.add(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_" + table +
+                "_hash_active ON " + table +
+                "(hash_key) WHERE is_active = TRUE"
+            );
+        }
+
+        // custom indexes
+        JsonNode indexes = schema.get("indexes");
+        if (indexes != null && indexes.isArray()) {
+            for (JsonNode idx : indexes) {
+                String name = idx.path("name").asText();
+                String type = idx.path("type").asText("BTREE");
+                String cols = join(idx.path("fields"));
+                ddl.add(
+                    "CREATE INDEX IF NOT EXISTS " + name +
+                    " ON " + table +
+                    " USING " + type +
+                    " (" + cols + ")"
+                );
+            }
+        }
+
+        return ddl;
+    }
+
+    /* =========================================================
+       Helpers
+     ========================================================= */
+
+    public static String physicalTable(String logical, int version) {
+        return logical + "_v" + version;
+    }
+
+    private static String join(JsonNode arr) {
+        List<String> cols = new ArrayList<>();
+        arr.forEach(n -> cols.add(n.asText()));
+        return String.join(",", cols);
+    }
+
+    private static String pgType(JsonNode def) {
+        String type = def.path("type").asText();
+
+        return switch (type) {
+            case "string", "keyword" -> "TEXT";
+            case "int", "integer"    -> "INT";
+            case "long"              -> "BIGINT";
+            case "decimal"           -> "NUMERIC";
+            case "boolean"           -> "BOOLEAN";
+            case "date"              -> "DATE";
+            case "timestamp"         -> "TIMESTAMP";
+            case "json", "jsonb"     -> "JSONB";
+            default -> throw new IllegalArgumentException(
+                "Unsupported column type: " + type
+            );
+        };
+    }
+}
