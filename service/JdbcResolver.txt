@@ -1,0 +1,67 @@
+package com.mmsapre.platform.service;
+
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Component;
+
+import javax.sql.DataSource;
+import java.util.Map;
+
+/**
+ * Resolves connection alias -> JdbcTemplate.
+ *
+ * This is the ONLY place where datasource routing happens.
+ * All tables, schemas, and operations remain generic.
+ *
+ * Example:
+ *   alias = "pg_main"
+ *   -> JdbcTemplate bound to postgres://.../schema
+ */
+@Component
+public class JdbcResolver {
+
+    private final Map<String, JdbcTemplate> jdbcByAlias;
+    private final Map<String, DataSource> dataSourceByAlias;
+
+    public JdbcResolver(
+            Map<String, JdbcTemplate> jdbcByAlias,
+            Map<String, DataSource> dataSourceByAlias
+    ) {
+        this.jdbcByAlias = jdbcByAlias;
+        this.dataSourceByAlias = dataSourceByAlias;
+    }
+
+    /**
+     * Resolve JdbcTemplate for alias.
+     */
+    public JdbcTemplate jdbc(String alias) {
+        JdbcTemplate jdbc = jdbcByAlias.get(alias);
+        if (jdbc == null) {
+            throw new IllegalArgumentException(
+                "Unknown datasource alias: " + alias +
+                ", available: " + jdbcByAlias.keySet()
+            );
+        }
+        return jdbc;
+    }
+
+    /**
+     * Optional: resolve raw DataSource (needed for PG COPY, transactions, etc.)
+     */
+    public DataSource dataSource(String alias) {
+        DataSource ds = dataSourceByAlias.get(alias);
+        if (ds == null) {
+            throw new IllegalArgumentException(
+                "Unknown datasource alias: " + alias +
+                ", available: " + dataSourceByAlias.keySet()
+            );
+        }
+        return ds;
+    }
+
+    /**
+     * Alias existence check (useful for validation)
+     */
+    public boolean hasAlias(String alias) {
+        return jdbcByAlias.containsKey(alias);
+    }
+}
