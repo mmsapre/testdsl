@@ -1,0 +1,54 @@
+package com.mmsapre.platform.service;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.mmsapre.platform.util.JsonUtil;
+import org.apache.commons.codec.digest.DigestUtils;
+import org.springframework.stereotype.Service;
+
+import java.util.Iterator;
+
+/**
+ * Computes deterministic hash_key for deduplication.
+ *
+ * Used by:
+ *  - UPSERT
+ *  - BULK (CSV / JSON)
+ *
+ * Hash is computed ONLY from schema-defined hash_keys.
+ */
+@Service
+public class HashService {
+
+    /**
+     * Compute hash from record + hash_keys.
+     *
+     * Example:
+     *   hash_keys = ["order_id","currency"]
+     *   input     = { "order_id":"O1","currency":"USD","amount":100 }
+     *
+     *   hash input string = "O1|USD|"
+     */
+    public String computeHash(
+            JsonNode record,
+            JsonNode hashKeys
+    ) {
+        if (hashKeys == null || !hashKeys.isArray()) {
+            throw new IllegalArgumentException("hash_keys missing or invalid");
+        }
+
+        StringBuilder sb = new StringBuilder();
+
+        Iterator<JsonNode> it = hashKeys.elements();
+        while (it.hasNext()) {
+            String key = it.next().asText();
+            JsonNode v = record.get(key);
+            sb.append(
+                v == null || v.isNull()
+                    ? ""
+                    : JsonUtil.unwrap(v)
+            ).append('|');
+        }
+
+        return DigestUtils.sha256Hex(sb.toString());
+    }
+}
