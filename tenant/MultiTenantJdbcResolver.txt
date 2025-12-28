@@ -1,0 +1,28 @@
+package com.mmsapre.platform.tenant;
+
+import com.mmsapre.platform.service.JdbcResolver;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Component;
+
+/**
+ * Applies schema isolation per request.
+ */
+@Component
+public class MultiTenantJdbcResolver {
+
+    private final JdbcResolver jdbcResolver;
+
+    public MultiTenantJdbcResolver(JdbcResolver jdbcResolver) {
+        this.jdbcResolver = jdbcResolver;
+    }
+
+    public JdbcTemplate jdbc(TenantContext ctx) {
+
+        JdbcTemplate jdbc = jdbcResolver.jdbc(ctx.alias());
+
+        // IMPORTANT: schema isolation
+        jdbc.execute("SET search_path TO " + ctx.schema());
+
+        return jdbc;
+    }
+}
