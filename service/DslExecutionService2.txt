@@ -1,0 +1,108 @@
+package com.mmsapre.platform.service;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.mmsapre.platform.registry.SchemaRegistryDao;
+import com.mmsapre.platform.sql.DdlGenerator;
+import com.mmsapre.platform.sql.DmlGenerator;
+import com.mmsapre.platform.sql.SqlAndParams;
+import com.mmsapre.platform.util.JsonUtil;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
+import org.springframework.stereotype.Service;
+
+import java.util.Map;
+
+@Service
+public class DslExecutionService {
+
+    private final JdbcResolver jdbcResolver;
+    private final SchemaRegistryDao registryDao;
+    private final HashService hashService;
+
+    public DslExecutionService(
+            JdbcResolver jdbcResolver,
+            SchemaRegistryDao registryDao,
+            HashService hashService
+    ) {
+        this.jdbcResolver = jdbcResolver;
+        this.registryDao = registryDao;
+        this.hashService = hashService;
+    }
+
+    public Object exec(
+            String alias,
+            String table,
+            String op,
+            String json
+    ) {
+        JdbcTemplate jdbc = jdbcResolver.jdbc(alias);
+
+        return switch (op) {
+            case "SEARCH" -> search(jdbc, table, json);
+            case "UPSERT" -> upsert(jdbc, table, json);
+            default -> throw new IllegalArgumentException("Unsupported op");
+        };
+    }
+
+    private Object search(JdbcTemplate jdbc, String table, String json) {
+
+        Map<String, Object> active =
+                registryDao.active(jdbc, table);
+
+        int version = (int) active.get("version");
+        String physical =
+                DdlGenerator.physicalTable(table, version);
+
+        JsonNode payload = JsonUtil.parse(json);
+
+        String sql =
+                DmlGenerator.selectHitsSql(
+                        physical,
+                        payload.get("query"),
+                        true,
+                        "is_active",
+                        "valid_from",
+                        "valid_to",
+                        null,
+                        10,
+                        0
+                );
+
+        return new NamedParameterJdbcTemplate(jdbc)
+                .queryForList(
+                        sql,
+                        JsonUtil.om().convertValue(
+                                payload.get("query"), Map.class
+                        )
+                );
+    }
+
+    private Object upsert(JdbcTemplate jdbc, String table, String json) {
+
+        JsonNode payload = JsonUtil.parse(json);
+        JsonNode record = payload.get("record");
+
+        Map<String, Object> active =
+                registryDao.active(jdbc, table);
+
+        int version = (int) active.get("version");
+        String physical =
+                DdlGenerator.physicalTable(table, version);
+
+        String hash =
+                hashService.computeHash(
+                        record,
+                        JsonUtil.parse(
+                                active.get("schema_json").toString()
+                        ).path("hash_keys")
+                );
+
+        SqlAndParams insert =
+                DmlGenerator.insert(physical, record, hash);
+
+        new NamedParameterJdbcTemplate(jdbc)
+                .update(insert.sql(), insert.params());
+
+        return Map.of("status", "OK", "hash", hash);
+    }
+}
