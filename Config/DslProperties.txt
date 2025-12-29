@@ -1,0 +1,47 @@
+package com.mmsapre.platform.config;
+
+import org.springframework.boot.context.properties.ConfigurationProperties;
+
+@ConfigurationProperties(prefix = "dsl")
+public class DslProperties {
+
+    private Parser parser = new Parser();
+    private Execution execution = new Execution();
+
+    public Parser getParser() { return parser; }
+    public Execution getExecution() { return execution; }
+
+    public static class Parser {
+        private boolean strict = true;
+
+        public boolean isStrict() { return strict; }
+        public void setStrict(boolean strict) { this.strict = strict; }
+    }
+
+    public static class Execution {
+        private int defaultPageSize = 10;
+        private int maxPageSize = 1000;
+        private boolean allowAlter = true;
+        private boolean allowDrop = false;
+
+        public int getDefaultPageSize() { return defaultPageSize; }
+        public void setDefaultPageSize(int defaultPageSize) {
+            this.defaultPageSize = defaultPageSize;
+        }
+
+        public int getMaxPageSize() { return maxPageSize; }
+        public void setMaxPageSize(int maxPageSize) {
+            this.maxPageSize = maxPageSize;
+        }
+
+        public boolean isAllowAlter() { return allowAlter; }
+        public void setAllowAlter(boolean allowAlter) {
+            this.allowAlter = allowAlter;
+        }
+
+        public boolean isAllowDrop() { return allowDrop; }
+        public void setAllowDrop(boolean allowDrop) {
+            this.allowDrop = allowDrop;
+        }
+    }
+}
