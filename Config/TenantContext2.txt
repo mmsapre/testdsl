@@ -1,0 +1,7 @@
+package com.mmsapre.platform.tenant;
+
+public record TenantContext(
+        String tenantId,
+        String alias,
+        String schema
+) {}
