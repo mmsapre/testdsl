@@ -1,0 +1,31 @@
+package com.mmsapre.platform.tenant;
+
+import com.mmsapre.platform.config.TenantProperties;
+import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.stereotype.Component;
+
+@Component
+public class TenantResolver {
+
+    private final TenantProperties props;
+
+    public TenantResolver(TenantProperties props) {
+        this.props = props;
+    }
+
+    public TenantContext resolve(HttpServletRequest request, String alias) {
+
+        String tenant =
+                request.getHeader(props.getHeader());
+
+        if (tenant == null || tenant.isBlank()) {
+            throw new IllegalArgumentException("Missing tenant header");
+        }
+
+        return new TenantContext(
+                tenant,          // tenant id
+                alias,           // datasource alias (from URL)
+                tenant           // schema = tenant
+        );
+    }
+}
