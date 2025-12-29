@@ -1,0 +1,26 @@
+package com.mmsapre.platform.service;
+
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Component;
+
+import java.util.Map;
+
+@Component
+public class JdbcResolver {
+
+    private final Map<String, JdbcTemplate> templates;
+
+    public JdbcResolver(Map<String, JdbcTemplate> templates) {
+        this.templates = templates;
+    }
+
+    public JdbcTemplate jdbc(String alias) {
+        JdbcTemplate jdbc = templates.get(alias);
+        if (jdbc == null) {
+            throw new IllegalArgumentException(
+                    "No datasource for alias: " + alias
+            );
+        }
+        return jdbc;
+    }
+}
