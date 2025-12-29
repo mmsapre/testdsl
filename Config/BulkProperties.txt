@@ -1,0 +1,57 @@
+package com.mmsapre.platform.config;
+
+import org.springframework.boot.context.properties.ConfigurationProperties;
+
+@ConfigurationProperties(prefix = "bulk")
+public class BulkProperties {
+
+    /**
+     * copy | batch
+     */
+    private String mode = "copy";
+
+    private Csv csv = new Csv();
+    private Copy copy = new Copy();
+
+    public String getMode() { return mode; }
+    public void setMode(String mode) { this.mode = mode; }
+
+    public Csv getCsv() { return csv; }
+    public Copy getCopy() { return copy; }
+
+    public static class Csv {
+        private String delimiter = ",";
+        private char quote = '"';
+        private char escape = '"';
+        private boolean headerDefault = true;
+
+        public String getDelimiter() { return delimiter; }
+        public void setDelimiter(String delimiter) { this.delimiter = delimiter; }
+
+        public char getQuote() { return quote; }
+        public void setQuote(char quote) { this.quote = quote; }
+
+        public char getEscape() { return escape; }
+        public void setEscape(char escape) { this.escape = escape; }
+
+        public boolean isHeaderDefault() { return headerDefault; }
+        public void setHeaderDefault(boolean headerDefault) {
+            this.headerDefault = headerDefault;
+        }
+    }
+
+    public static class Copy {
+        private int batchSize = 5000;
+        private boolean failOnError = false;
+
+        public int getBatchSize() { return batchSize; }
+        public void setBatchSize(int batchSize) {
+            this.batchSize = batchSize;
+        }
+
+        public boolean isFailOnError() { return failOnError; }
+        public void setFailOnError(boolean failOnError) {
+            this.failOnError = failOnError;
+        }
+    }
+}
