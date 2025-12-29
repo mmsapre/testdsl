@@ -1,0 +1,40 @@
+package com.mmsapre.platform.config;
+
+import org.springframework.boot.context.properties.ConfigurationProperties;
+
+@ConfigurationProperties(prefix = "scd")
+public class ScdProperties {
+
+    /**
+     * 1 | 2
+     */
+    private int type = 2;
+
+    private String activeFlag = "is_active";
+    private String startDate = "valid_from";
+    private String endDate = "valid_to";
+    private String openEndedDate = "9999-12-31";
+
+    public int getType() { return type; }
+    public void setType(int type) { this.type = type; }
+
+    public String getActiveFlag() { return activeFlag; }
+    public void setActiveFlag(String activeFlag) {
+        this.activeFlag = activeFlag;
+    }
+
+    public String getStartDate() { return startDate; }
+    public void setStartDate(String startDate) {
+        this.startDate = startDate;
+    }
+
+    public String getEndDate() { return endDate; }
+    public void setEndDate(String endDate) {
+        this.endDate = endDate;
+    }
+
+    public String getOpenEndedDate() { return openEndedDate; }
+    public void setOpenEndedDate(String openEndedDate) {
+        this.openEndedDate = openEndedDate;
+    }
+}
