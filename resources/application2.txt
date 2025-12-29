@@ -1,0 +1,109 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: dsl-postgres-platform
+
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+
+  main:
+    banner-mode: "off"
+
+# ============================================================
+# DATASOURCE ALIASES (NO ORM)
+# ============================================================
+datasources:
+  pg_main:
+    driver-class-name: org.postgresql.Driver
+    jdbc-url: jdbc:postgresql://localhost:5432/dsl_platform
+    username: dsl_user
+    password: dsl_pass
+    pool:
+      max-size: 20
+      min-idle: 5
+      idle-timeout-ms: 300000
+
+  pg_reporting:
+    driver-class-name: org.postgresql.Driver
+    jdbc-url: jdbc:postgresql://localhost:5432/dsl_reporting
+    username: report_user
+    password: report_pass
+    pool:
+      max-size: 10
+
+# ============================================================
+# MULTI-TENANCY
+# ============================================================
+tenant:
+  mode: schema            # schema | database (future)
+  header: X-Tenant-Id
+  default-alias: pg_main
+
+# ============================================================
+# DSL ENGINE
+# ============================================================
+dsl:
+  parser:
+    strict: true           # fail fast on invalid DSL
+  execution:
+    max-page-size: 1000
+    default-page-size: 10
+    allow-alter: true
+    allow-drop: false
+
+# ============================================================
+# BULK INGESTION
+# ============================================================
+bulk:
+  mode: copy               # copy | batch
+  csv:
+    delimiter: ","
+    quote: '"'
+    escape: '"'
+    header-default: true
+  copy:
+    batch-size: 5000
+    fail-on-error: false   # rely on unique index for dedup
+
+# ============================================================
+# SCD-2 + DEDUP DEFAULTS
+# ============================================================
+scd:
+  type: 2
+  active-flag: is_active
+  start-date: valid_from
+  end-date: valid_to
+  open-ended-date: "9999-12-31"
+
+dedup:
+  hash-algorithm: sha256
+  separator: "|"
+
+# ============================================================
+# SCHEMA REGISTRY (CONTROL PLANE)
+# ============================================================
+schema-registry:
+  table: schema_registry
+  auto-bootstrap: true
+
+# ============================================================
+# LOGGING
+# ============================================================
+logging:
+  level:
+    root: INFO
+    com.mmsapre.platform: DEBUG
+    org.springframework.jdbc.core: INFO
+    org.postgresql: WARN
+
+# ============================================================
+# MANAGEMENT (OPTIONAL)
+# ============================================================
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
