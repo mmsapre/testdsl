@@ -1,0 +1,54 @@
+package com.mmsapre.platform.config;
+
+import com.zaxxer.hikari.HikariConfig;
+import com.zaxxer.hikari.HikariDataSource;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.jdbc.core.JdbcTemplate;
+
+import javax.sql.DataSource;
+import java.util.HashMap;
+import java.util.Map;
+
+@Configuration
+@EnableConfigurationProperties(DatasourceProperties.class)
+public class JdbcConfig {
+
+    @Bean
+    public Map<String, DataSource> dataSources(
+            DatasourceProperties properties
+    ) {
+        Map<String, DataSource> map = new HashMap<>();
+
+        properties.getConfigs().forEach((alias, cfg) -> {
+
+            HikariConfig hc = new HikariConfig();
+            hc.setJdbcUrl(cfg.getJdbcUrl());
+            hc.setUsername(cfg.getUsername());
+            hc.setPassword(cfg.getPassword());
+            hc.setDriverClassName(cfg.getDriverClassName());
+
+            hc.setMaximumPoolSize(cfg.getPool().getMaxSize());
+            hc.setMinimumIdle(cfg.getPool().getMinIdle());
+            hc.setIdleTimeout(cfg.getPool().getIdleTimeoutMs());
+
+            hc.setPoolName("pool-" + alias);
+
+            map.put(alias, new HikariDataSource(hc));
+        });
+
+        return map;
+    }
+
+    @Bean
+    public Map<String, JdbcTemplate> jdbcTemplates(
+            Map<String, DataSource> dataSources
+    ) {
+        Map<String, JdbcTemplate> map = new HashMap<>();
+        dataSources.forEach(
+                (alias, ds) -> map.put(alias, new JdbcTemplate(ds))
+        );
+        return map;
+    }
+}
