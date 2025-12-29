@@ -1,0 +1,33 @@
+package com.mmsapre.platform.config;
+
+import org.springframework.boot.context.properties.ConfigurationProperties;
+
+@ConfigurationProperties(prefix = "tenant")
+public class TenantProperties {
+
+    /**
+     * schema | database (future)
+     */
+    private String mode = "schema";
+
+    /**
+     * Header name to resolve tenant
+     */
+    private String header = "X-Tenant-Id";
+
+    /**
+     * Default datasource alias
+     */
+    private String defaultAlias = "pg_main";
+
+    public String getMode() { return mode; }
+    public void setMode(String mode) { this.mode = mode; }
+
+    public String getHeader() { return header; }
+    public void setHeader(String header) { this.header = header; }
+
+    public String getDefaultAlias() { return defaultAlias; }
+    public void setDefaultAlias(String defaultAlias) {
+        this.defaultAlias = defaultAlias;
+    }
+}
