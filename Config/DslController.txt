@@ -1,0 +1,60 @@
+package com.mmsapre.platform.api;
+
+import com.mmsapre.platform.service.DslExecutionService;
+import com.mmsapre.platform.tenant.MultiTenantJdbcResolver;
+import com.mmsapre.platform.tenant.TenantContext;
+import com.mmsapre.platform.tenant.TenantResolver;
+import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+@RestController
+@RequestMapping("/")
+public class DslController {
+
+    private final DslExecutionService executionService;
+    private final TenantResolver tenantResolver;
+    private final MultiTenantJdbcResolver jdbcResolver;
+
+    public DslController(
+            DslExecutionService executionService,
+            TenantResolver tenantResolver,
+            MultiTenantJdbcResolver jdbcResolver
+    ) {
+        this.executionService = executionService;
+        this.tenantResolver = tenantResolver;
+        this.jdbcResolver = jdbcResolver;
+    }
+
+    @PostMapping("/{alias}/{table}/_search")
+    public ResponseEntity<?> search(
+            HttpServletRequest request,
+            @PathVariable String alias,
+            @PathVariable String table,
+            @RequestBody String body
+    ) {
+        TenantContext ctx = tenantResolver.resolve(request, alias);
+
+        // Sets search_path = tenant schema
+        jdbcResolver.jdbc(ctx);
+
+        return ResponseEntity.ok(
+                executionService.exec(alias, table, "SEARCH", body)
+        );
+    }
+
+    @PostMapping("/{alias}/{table}/_upsert")
+    public ResponseEntity<?> upsert(
+            HttpServletRequest request,
+            @PathVariable String alias,
+            @PathVariable String table,
+            @RequestBody String body
+    ) {
+        TenantContext ctx = tenantResolver.resolve(request, alias);
+        jdbcResolver.jdbc(ctx);
+
+        return ResponseEntity.ok(
+                executionService.exec(alias, table, "UPSERT", body)
+        );
+    }
+}
