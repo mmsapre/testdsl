@@ -1,0 +1,16 @@
+package com.mmsapre.platform.config;
+
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.context.annotation.Configuration;
+
+@Configuration
+@EnableConfigurationProperties({
+        TenantProperties.class,
+        DslProperties.class,
+        BulkProperties.class,
+        ScdProperties.class,
+        DedupProperties.class,
+        DatasourceProperties.class
+})
+public class PlatformPropertiesConfig {
+}
