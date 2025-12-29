@@ -1,0 +1,24 @@
+package com.mmsapre.platform.config;
+
+import org.springframework.boot.context.properties.ConfigurationProperties;
+
+@ConfigurationProperties(prefix = "dedup")
+public class DedupProperties {
+
+    /**
+     * sha256 | md5 (sha256 recommended)
+     */
+    private String hashAlgorithm = "sha256";
+
+    private String separator = "|";
+
+    public String getHashAlgorithm() { return hashAlgorithm; }
+    public void setHashAlgorithm(String hashAlgorithm) {
+        this.hashAlgorithm = hashAlgorithm;
+    }
+
+    public String getSeparator() { return separator; }
+    public void setSeparator(String separator) {
+        this.separator = separator;
+    }
+}
