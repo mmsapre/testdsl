@@ -1,0 +1,25 @@
+package com.mmsapre.platform.sql;
+
+public final class SqlNames {
+
+    private SqlNames() {}
+
+    public static String table(
+            String schema,
+            String table
+    ) {
+        return quote(schema) + "." + quote(table);
+    }
+
+    public static String versioned(
+            String schema,
+            String table,
+            int version
+    ) {
+        return quote(schema) + "." + quote(table + "_v" + version);
+    }
+
+    private static String quote(String id) {
+        return "\"" + id + "\"";
+    }
+}
