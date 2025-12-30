@@ -1,0 +1,151 @@
+@Service
+public class DslExecutionService {
+
+    private final MultiTenantJdbcResolver jdbcResolver;
+    private final SchemaRegistryDao registryDao;
+    private final HashService hashService;
+
+    public DslExecutionService(
+            MultiTenantJdbcResolver jdbcResolver,
+            SchemaRegistryDao registryDao,
+            HashService hashService
+    ) {
+        this.jdbcResolver = jdbcResolver;
+        this.registryDao = registryDao;
+        this.hashService = hashService;
+    }
+
+    public Object execute(
+            TenantContext ctx,
+            String table,
+            String operation,
+            String payload
+    ) {
+
+        JdbcTemplate jdbc = jdbcResolver.jdbc(ctx);
+
+        return switch (operation) {
+            case "SEARCH" -> search(jdbc, ctx, table, payload);
+            case "UPSERT" -> upsert(jdbc, ctx, table, payload);
+            case "DELETE" -> softDelete(jdbc, ctx, table, payload);
+            default -> throw new IllegalArgumentException(
+                    "Unsupported operation: " + operation
+            );
+        };
+    }
+
+    // ------------------------------------------------------------------
+
+    private Object search(
+            JdbcTemplate jdbc,
+            TenantContext ctx,
+            String table,
+            String json
+    ) {
+        Map<String, Object> active =
+                registryDao.active(jdbc, table);
+
+        int version = (int) active.get("version");
+
+        String physical =
+                SqlNames.versioned(ctx.schema(), table, version);
+
+        String sql = """
+            SELECT *
+            FROM %s
+            WHERE is_active = true
+            """.formatted(physical);
+
+        return jdbc.queryForList(sql);
+    }
+
+    // ------------------------------------------------------------------
+
+    private Object upsert(
+            JdbcTemplate jdbc,
+            TenantContext ctx,
+            String table,
+            String json
+    ) {
+        JsonNode record =
+                JsonUtil.parse(json).get("record");
+
+        Map<String, Object> active =
+                registryDao.active(jdbc, table);
+
+        int version = (int) active.get("version");
+
+        String physical =
+                SqlNames.versioned(ctx.schema(), table, version);
+
+        String hash =
+                hashService.computeHash(
+                        record,
+                        JsonUtil.parse(
+                                active.get("schema_json").toString()
+                        ).path("hash_keys")
+                );
+
+        SqlAndParams insert =
+                DmlGenerator.insert(
+                        physical,
+                        record,
+                        hash
+                );
+
+        new NamedParameterJdbcTemplate(jdbc)
+                .update(insert.sql(), insert.params());
+
+        return Map.of(
+                "status", "OK",
+                "schema", ctx.schema(),
+                "table", physical,
+                "hash", hash
+        );
+    }
+
+    // ------------------------------------------------------------------
+
+    private Object softDelete(
+            JdbcTemplate jdbc,
+            TenantContext ctx,
+            String table,
+            String json
+    ) {
+        JsonNode key =
+                JsonUtil.parse(json).get("business_key");
+
+        Map<String, Object> active =
+                registryDao.active(jdbc, table);
+
+        int version = (int) active.get("version");
+
+        String physical =
+                SqlNames.versioned(ctx.schema(), table, version);
+
+        String sql = """
+            UPDATE %s
+            SET is_active = false,
+                valid_to = now()
+            WHERE hash = :hash
+              AND is_active = true
+            """.formatted(physical);
+
+        String hash =
+                hashService.computeHash(
+                        key,
+                        JsonUtil.parse(
+                                active.get("schema_json").toString()
+                        ).path("hash_keys")
+                );
+
+        new NamedParameterJdbcTemplate(jdbc)
+                .update(sql, Map.of("hash", hash));
+
+        return Map.of(
+                "status", "DELETED",
+                "schema", ctx.schema(),
+                "table", physical
+        );
+    }
+}
