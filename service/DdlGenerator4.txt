@@ -1,0 +1,87 @@
+package com.mmsapre.platform.sql;
+
+import java.util.Map;
+import java.util.stream.Collectors;
+
+public final class DdlGenerator {
+
+    private DdlGenerator() {}
+
+    /* ----------------------------------------------------
+     * CREATE TABLE (versioned)
+     * -------------------------------------------------- */
+
+    public static String createTable(
+            String schema,
+            String table,
+            int version,
+            Map<String, ColumnDef> columns
+    ) {
+
+        String physical = SqlNames.versioned(schema, table, version);
+
+        String cols =
+                columns.entrySet().stream()
+                        .map(e -> columnSql(e.getKey(), e.getValue()))
+                        .collect(Collectors.joining(",\n"));
+
+        return """
+            CREATE TABLE %s (
+                id BIGSERIAL PRIMARY KEY,
+                %s,
+                hash VARCHAR(64) NOT NULL,
+                is_active BOOLEAN NOT NULL,
+                valid_from TIMESTAMP NOT NULL,
+                valid_to TIMESTAMP NOT NULL
+            )
+            """.formatted(physical, cols);
+    }
+
+    /* ----------------------------------------------------
+     * UNIQUE HASH INDEX (DEDUP)
+     * -------------------------------------------------- */
+
+    public static String createHashIndex(
+            String schema,
+            String table,
+            int version
+    ) {
+        String physical = SqlNames.versioned(schema, table, version);
+        String idx = "ux_" + table + "_v" + version + "_hash";
+
+        return """
+            CREATE UNIQUE INDEX %s
+            ON %s (hash)
+            """.formatted(idx, physical);
+    }
+
+    /* ----------------------------------------------------
+     * COLUMN SQL
+     * -------------------------------------------------- */
+
+    private static String columnSql(String name, ColumnDef def) {
+        return switch (def.type()) {
+            case "varchar" ->
+                    name + " VARCHAR(" + def.length() + ")";
+            case "bigint" ->
+                    name + " BIGINT";
+            case "timestamp" ->
+                    name + " TIMESTAMP";
+            case "boolean" ->
+                    name + " BOOLEAN";
+            default ->
+                    throw new IllegalArgumentException(
+                            "Unsupported column type: " + def.type()
+                    );
+        };
+    }
+
+    /* ----------------------------------------------------
+     * SUPPORT RECORD
+     * -------------------------------------------------- */
+
+    public record ColumnDef(
+            String type,
+            int length
+    ) {}
+}
