@@ -1,0 +1,164 @@
+package com.mmsapre.platform.api;
+
+import com.mmsapre.platform.service.BulkService;
+import com.mmsapre.platform.service.DslExecutionService;
+import com.mmsapre.platform.tenant.TenantContext;
+import com.mmsapre.platform.tenant.TenantResolver;
+import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+@RestController
+@RequestMapping("/")
+public class DslController {
+
+    private final TenantResolver tenantResolver;
+    private final DslExecutionService executionService;
+    private final BulkService bulkService;
+
+    public DslController(
+            TenantResolver tenantResolver,
+            DslExecutionService executionService,
+            BulkService bulkService
+    ) {
+        this.tenantResolver = tenantResolver;
+        this.executionService = executionService;
+        this.bulkService = bulkService;
+    }
+
+    // ------------------------------------------------------------------
+    // CREATE TABLE (DRAFT)
+    // ------------------------------------------------------------------
+
+    @PutMapping("/{alias}/{table}")
+    public ResponseEntity<?> createTable(
+            HttpServletRequest request,
+            @PathVariable String alias,
+            @PathVariable String table,
+            @RequestBody String schemaJson
+    ) {
+        TenantContext ctx = tenantResolver.resolve(request, alias);
+
+        return ResponseEntity.ok(
+                executionService.execute(
+                        ctx,
+                        table,
+                        "CREATE",
+                        schemaJson
+                )
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // APPROVE (MAKER → CHECKER)
+    // ------------------------------------------------------------------
+
+    @PostMapping("/{alias}/{table}/_approve")
+    public ResponseEntity<?> approve(
+            HttpServletRequest request,
+            @PathVariable String alias,
+            @PathVariable String table
+    ) {
+        TenantContext ctx = tenantResolver.resolve(request, alias);
+
+        return ResponseEntity.ok(
+                executionService.execute(
+                        ctx,
+                        table,
+                        "APPROVE",
+                        null
+                )
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // SEARCH (ES-style)
+    // ------------------------------------------------------------------
+
+    @PostMapping("/{alias}/{table}/_search")
+    public ResponseEntity<?> search(
+            HttpServletRequest request,
+            @PathVariable String alias,
+            @PathVariable String table,
+            @RequestBody String queryJson
+    ) {
+        TenantContext ctx = tenantResolver.resolve(request, alias);
+
+        return ResponseEntity.ok(
+                executionService.execute(
+                        ctx,
+                        table,
+                        "SEARCH",
+                        queryJson
+                )
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // UPSERT (INSERT / UPDATE → SCD2)
+    // ------------------------------------------------------------------
+
+    @PostMapping("/{alias}/{table}/_upsert")
+    public ResponseEntity<?> upsert(
+            HttpServletRequest request,
+            @PathVariable String alias,
+            @PathVariable String table,
+            @RequestBody String payload
+    ) {
+        TenantContext ctx = tenantResolver.resolve(request, alias);
+
+        return ResponseEntity.ok(
+                executionService.execute(
+                        ctx,
+                        table,
+                        "UPSERT",
+                        payload
+                )
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // SOFT DELETE (SCD2)
+    // ------------------------------------------------------------------
+
+    @DeleteMapping("/{alias}/{table}/_doc")
+    public ResponseEntity<?> delete(
+            HttpServletRequest request,
+            @PathVariable String alias,
+            @PathVariable String table,
+            @RequestBody String keyJson
+    ) {
+        TenantContext ctx = tenantResolver.resolve(request, alias);
+
+        return ResponseEntity.ok(
+                executionService.execute(
+                        ctx,
+                        table,
+                        "DELETE",
+                        keyJson
+                )
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // BULK (CSV → COPY)
+    // ------------------------------------------------------------------
+
+    @PostMapping("/{alias}/{table}/_bulk")
+    public ResponseEntity<?> bulk(
+            HttpServletRequest request,
+            @PathVariable String alias,
+            @PathVariable String table,
+            @RequestBody String bulkJson
+    ) {
+        TenantContext ctx = tenantResolver.resolve(request, alias);
+
+        return ResponseEntity.ok(
+                bulkService.bulkInsert(
+                        ctx,
+                        table,
+                        bulkJson
+                )
+        );
+    }
+}
