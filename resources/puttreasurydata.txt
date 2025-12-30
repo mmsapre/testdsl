@@ -1,0 +1,17 @@
+{
+  "columns": {
+    "currency":         { "type": "varchar", "length": 10 },
+    "cash_start":       { "type": "timestamp" },
+    "cash_end":         { "type": "timestamp" },
+    "pool_threshold":   { "type": "bigint" },
+    "nostro_acc_name":  { "type": "varchar", "length": 100 },
+    "nostro_acc_no":    { "type": "varchar", "length": 50 }
+  },
+  "hash_keys": ["currency", "nostro_acc_no"],
+  "scd": {
+    "type": 2,
+    "active_flag": "is_active",
+    "start_date": "valid_from",
+    "end_date": "valid_to"
+  }
+}
