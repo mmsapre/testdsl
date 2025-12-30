@@ -1,0 +1,23 @@
+@Component
+public class MultiTenantJdbcResolver {
+
+    private final JdbcResolver jdbcResolver;
+
+    public MultiTenantJdbcResolver(JdbcResolver jdbcResolver) {
+        this.jdbcResolver = jdbcResolver;
+    }
+
+    /**
+     * Returns a JdbcTemplate with search_path set.
+     * ALL execution goes through this.
+     */
+    public JdbcTemplate jdbc(TenantContext ctx) {
+
+        JdbcTemplate jdbc = jdbcResolver.jdbc(ctx.alias());
+
+        // 🔐 CRITICAL: schema enforcement
+        jdbc.execute("SET search_path TO " + ctx.schema());
+
+        return jdbc;
+    }
+}
