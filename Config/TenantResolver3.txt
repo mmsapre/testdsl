@@ -1,0 +1,46 @@
+@Component
+public class TenantResolver {
+
+    private final DatasourceProperties datasourceProps;
+    private final TenantProperties tenantProps;
+
+    public TenantResolver(
+            DatasourceProperties datasourceProps,
+            TenantProperties tenantProps
+    ) {
+        this.datasourceProps = datasourceProps;
+        this.tenantProps = tenantProps;
+    }
+
+    public TenantContext resolve(HttpServletRequest request, String alias) {
+
+        DatasourceProperties.DatasourceConfig cfg =
+                datasourceProps.getConfigs().get(alias);
+
+        if (cfg == null) {
+            throw new IllegalArgumentException("Unknown alias: " + alias);
+        }
+
+        // 1️⃣ schema from alias config
+        String schema = cfg.getSchema();
+
+        // 2️⃣ optional override
+        String schemaOverride =
+                request.getHeader(tenantProps.getSchemaHeader());
+
+        if (schemaOverride != null && !schemaOverride.isBlank()) {
+            schema = schemaOverride;
+        }
+
+        if (schema == null || schema.isBlank()) {
+            throw new IllegalStateException(
+                    "Schema not resolved for alias: " + alias
+            );
+        }
+
+        String tenantId =
+                request.getHeader(tenantProps.getHeader());
+
+        return new TenantContext(alias, schema, tenantId);
+    }
+}
