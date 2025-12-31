@@ -1,0 +1,142 @@
+package com.mmsapre.platform.api;
+
+import com.mmsapre.dsl.DslCommand;
+import com.mmsapre.platform.compat.DslRestCompatibility;
+import com.mmsapre.platform.service.DslExecutionService;
+import com.mmsapre.platform.tenant.TenantContext;
+import com.mmsapre.platform.tenant.TenantResolver;
+import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+@RestController
+@RequestMapping("/")
+public class DslController {
+
+    private final TenantResolver tenantResolver;
+    private final DslExecutionService executionService;
+    private final DslRestCompatibility compat = new DslRestCompatibility();
+
+    public DslController(
+            TenantResolver tenantResolver,
+            DslExecutionService executionService
+    ) {
+        this.tenantResolver = tenantResolver;
+        this.executionService = executionService;
+    }
+
+    /* =========================================================
+       DSL ENTRY (RAW DSL TEXT)
+     ========================================================= */
+
+    @PostMapping("/_dsl")
+    public ResponseEntity<?> executeDsl(
+            HttpServletRequest request,
+            @RequestBody String dsl
+    ) {
+        TenantContext ctx = tenantResolver.resolve(request);
+        DslCommand cmd = compat.fromDsl(dsl);
+        return ResponseEntity.ok(executionService.execute(ctx, cmd));
+    }
+
+    /* =========================================================
+       REST (ES-COMPATIBLE)
+       /{alias}/{schema}/{table}
+     ========================================================= */
+
+    @PutMapping("/{alias}/{schema}/{table}")
+    public ResponseEntity<?> createDraft(
+            HttpServletRequest request,
+            @PathVariable String alias,
+            @PathVariable String schema,
+            @PathVariable String table,
+            @RequestBody String body
+    ) {
+        TenantContext ctx = tenantResolver.resolve(request, alias, schema);
+        DslCommand cmd = compat.fromRest("PUT", schema, table, null, body);
+        return ResponseEntity.ok(executionService.execute(ctx, cmd));
+    }
+
+    @PostMapping("/{alias}/{schema}/{table}/_alter")
+    public ResponseEntity<?> alterDraft(
+            HttpServletRequest request,
+            @PathVariable String alias,
+            @PathVariable String schema,
+            @PathVariable String table,
+            @RequestBody String body
+    ) {
+        TenantContext ctx = tenantResolver.resolve(request, alias, schema);
+        DslCommand cmd = compat.fromRest("POST", schema, table, "_alter", body);
+        return ResponseEntity.ok(executionService.execute(ctx, cmd));
+    }
+
+    @PostMapping("/{alias}/{schema}/{table}/_approve")
+    public ResponseEntity<?> approve(
+            HttpServletRequest request,
+            @PathVariable String alias,
+            @PathVariable String schema,
+            @PathVariable String table
+    ) {
+        TenantContext ctx = tenantResolver.resolve(request, alias, schema);
+
+        DslCommand cmd = DslCommand.builder()
+                .type(DslCommand.Type.APPROVE)
+                .table(table)
+                .alias(alias)
+                .build();
+
+        return ResponseEntity.ok(executionService.execute(ctx, cmd));
+    }
+
+    @PostMapping("/{alias}/{schema}/{table}/_upsert")
+    public ResponseEntity<?> upsert(
+            HttpServletRequest request,
+            @PathVariable String alias,
+            @PathVariable String schema,
+            @PathVariable String table,
+            @RequestBody String body
+    ) {
+        TenantContext ctx = tenantResolver.resolve(request, alias, schema);
+        DslCommand cmd = compat.fromRest("POST", schema, table, "_upsert", body);
+        return ResponseEntity.ok(executionService.execute(ctx, cmd));
+    }
+
+    @PostMapping("/{alias}/{schema}/{table}/_bulk")
+    public ResponseEntity<?> bulk(
+            HttpServletRequest request,
+            @PathVariable String alias,
+            @PathVariable String schema,
+            @PathVariable String table,
+            @RequestBody String body
+    ) {
+        TenantContext ctx = tenantResolver.resolve(request, alias, schema);
+        DslCommand cmd = compat.fromRest("POST", schema, table, "_bulk", body);
+        return ResponseEntity.ok(executionService.execute(ctx, cmd));
+    }
+
+    @PostMapping("/{alias}/{schema}/{table}/_search")
+    public ResponseEntity<?> search(
+            HttpServletRequest request,
+            @PathVariable String alias,
+            @PathVariable String schema,
+            @PathVariable String table,
+            @RequestBody String body
+    ) {
+        TenantContext ctx = tenantResolver.resolve(request, alias, schema);
+        DslCommand cmd = compat.fromRest("POST", schema, table, "_search", body);
+        return ResponseEntity.ok(executionService.execute(ctx, cmd));
+    }
+
+    @DeleteMapping("/{alias}/{schema}/{table}/_doc")
+    public ResponseEntity<?> delete(
+            HttpServletRequest request,
+            @PathVariable String alias,
+            @PathVariable String schema,
+            @PathVariable String table,
+            @RequestBody String body
+    ) {
+        TenantContext ctx = tenantResolver.resolve(request, alias, schema);
+        DslCommand cmd = compat.fromRest("DELETE", schema, table, "_doc", body);
+        return ResponseEntity.ok(executionService.execute(ctx, cmd));
+    }
+}
