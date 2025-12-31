@@ -1,0 +1,103 @@
+package com.mmsapre.platform.tenant;
+
+/**
+ * Immutable tenant execution context.
+ *
+ * Carries:
+ *  - datasource alias
+ *  - tenant schema
+ *  - optional user identity
+ *
+ * Passed explicitly from Controller → Service → SQL.
+ */
+public final class TenantContext {
+
+    private final String alias;    // datasource key (pg_main, pg_dr, etc.)
+    private final String schema;   // tenant schema (treasury, risk, etc.)
+    private final String user;     // optional (audit / RBAC)
+
+    private TenantContext(
+            String alias,
+            String schema,
+            String user
+    ) {
+        this.alias = alias;
+        this.schema = schema;
+        this.user = user;
+    }
+
+    /* =========================================================
+       FACTORIES
+     ========================================================= */
+
+    public static TenantContext of(
+            String alias,
+            String schema
+    ) {
+        return of(alias, schema, null);
+    }
+
+    public static TenantContext of(
+            String alias,
+            String schema,
+            String user
+    ) {
+        if (isBlank(alias)) {
+            throw new IllegalArgumentException("Datasource alias must not be blank");
+        }
+        if (isBlank(schema)) {
+            throw new IllegalArgumentException("Tenant schema must not be blank");
+        }
+        return new TenantContext(alias, schema, user);
+    }
+
+    /* =========================================================
+       ACCESSORS
+     ========================================================= */
+
+    public String alias() {
+        return alias;
+    }
+
+    public String schema() {
+        return schema;
+    }
+
+    public String user() {
+        return user;
+    }
+
+    /* =========================================================
+       HELPERS
+     ========================================================= */
+
+    /**
+     * Qualify a logical table name with tenant schema.
+     *
+     * Example:
+     *   qualify("treasury_data") → treasury.treasury_data
+     */
+    public String qualify(String table) {
+        if (isBlank(table)) {
+            throw new IllegalArgumentException("Table name must not be blank");
+        }
+        return schema + "." + table;
+    }
+
+    @Override
+    public String toString() {
+        return "TenantContext{" +
+                "alias='" + alias + '\'' +
+                ", schema='" + schema + '\'' +
+                ", user='" + user + '\'' +
+                '}';
+    }
+
+    /* =========================================================
+       INTERNAL
+     ========================================================= */
+
+    private static boolean isBlank(String v) {
+        return v == null || v.trim().isEmpty();
+    }
+}
