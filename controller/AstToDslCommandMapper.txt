@@ -1,0 +1,39 @@
+package com.mmsapre.dsl.map;
+
+import com.mmsapre.dsl.DslCommand;
+import com.mmsapre.dsl.ast.AstCommand;
+import com.fasterxml.jackson.databind.JsonNode;
+
+public final class AstToDslCommandMapper {
+
+    private AstToDslCommandMapper() {}
+
+    public static DslCommand map(AstCommand ast) {
+
+        DslCommand.Type type = switch (ast.verb()) {
+            case PUT -> DslCommand.Type.CREATE;
+            case APPROVE -> DslCommand.Type.APPROVE;
+            case DELETE -> DslCommand.Type.DELETE;
+            case POST -> switch (ast.op()) {
+                case UPSERT -> DslCommand.Type.UPSERT;
+                case BULK -> DslCommand.Type.BULK;
+                case SEARCH -> DslCommand.Type.SEARCH;
+                case ALTER -> DslCommand.Type.ALTER;
+                default -> throw new IllegalArgumentException("POST requires operation (_upsert/_bulk/_search/_alter)");
+            };
+        };
+
+        String json = ast.payload() == null ? null : ast.payload().toString();
+
+        // IMPORTANT: in this DSL, schema is the "tenant schema".
+        // alias (datasource alias) still comes from REST path or header.
+        return DslCommand.builder()
+                .table(ast.table())
+                .type(type)
+                .json(json)
+                // We store schema into alias field only if you want old compatibility.
+                // Prefer: keep schema in TenantContext. So we don't overload alias here.
+                .alias("N/A")
+                .build();
+    }
+}
