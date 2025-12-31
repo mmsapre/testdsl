@@ -1,0 +1,172 @@
+package com.mmsapre.platform.api;
+
+import com.mmsapre.dsl.DslCommand;
+import com.mmsapre.platform.service.DslExecutionService;
+import com.mmsapre.platform.tenant.TenantContext;
+import com.mmsapre.platform.tenant.TenantResolver;
+import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+@RestController
+@RequestMapping("/")
+public class DslController {
+
+    private final TenantResolver tenantResolver;
+    private final DslExecutionService executionService;
+
+    public DslController(
+            TenantResolver tenantResolver,
+            DslExecutionService executionService
+    ) {
+        this.tenantResolver = tenantResolver;
+        this.executionService = executionService;
+    }
+
+    /* =========================================================
+       CREATE / ALTER (DRAFT)
+     ========================================================= */
+
+    @PutMapping("/{alias}/{table}")
+    public ResponseEntity<?> create(
+            HttpServletRequest request,
+            @PathVariable String alias,
+            @PathVariable String table,
+            @RequestBody String schemaJson
+    ) {
+        TenantContext ctx = tenantResolver.resolve(request, alias);
+
+        DslCommand cmd = DslCommandFactory.create(
+                alias, table, schemaJson
+        );
+
+        return ResponseEntity.ok(
+                executionService.execute(ctx, cmd)
+        );
+    }
+
+    @PatchMapping("/{alias}/{table}")
+    public ResponseEntity<?> alter(
+            HttpServletRequest request,
+            @PathVariable String alias,
+            @PathVariable String table,
+            @RequestBody String schemaJson
+    ) {
+        TenantContext ctx = tenantResolver.resolve(request, alias);
+
+        DslCommand cmd = DslCommandFactory.alter(
+                alias, table, schemaJson
+        );
+
+        return ResponseEntity.ok(
+                executionService.execute(ctx, cmd)
+        );
+    }
+
+    /* =========================================================
+       APPROVE (MAKER → CHECKER)
+     ========================================================= */
+
+    @PostMapping("/{alias}/{table}/_approve")
+    public ResponseEntity<?> approve(
+            HttpServletRequest request,
+            @PathVariable String alias,
+            @PathVariable String table
+    ) {
+        TenantContext ctx = tenantResolver.resolve(request, alias);
+
+        DslCommand cmd = DslCommandFactory.approve(alias, table);
+
+        return ResponseEntity.ok(
+                executionService.execute(ctx, cmd)
+        );
+    }
+
+    /* =========================================================
+       UPSERT
+     ========================================================= */
+
+    @PostMapping("/{alias}/{table}/_upsert")
+    public ResponseEntity<?> upsert(
+            HttpServletRequest request,
+            @PathVariable String alias,
+            @PathVariable String table,
+            @RequestBody String payload
+    ) {
+        TenantContext ctx = tenantResolver.resolve(request, alias);
+
+        DslCommand cmd = DslCommandFactory.upsert(
+                alias, table, payload
+        );
+
+        return ResponseEntity.ok(
+                executionService.execute(ctx, cmd)
+        );
+    }
+
+    /* =========================================================
+       BULK (CSV / JSON)
+     ========================================================= */
+
+    @PostMapping("/{alias}/{table}/_bulk")
+    public ResponseEntity<?> bulk(
+            HttpServletRequest request,
+            @PathVariable String alias,
+            @PathVariable String table,
+            @RequestBody String payload
+    ) {
+        TenantContext ctx = tenantResolver.resolve(request, alias);
+
+        DslCommand cmd = DslCommandFactory.bulk(
+                alias, table, payload
+        );
+
+        return ResponseEntity.ok(
+                executionService.execute(ctx, cmd)
+        );
+    }
+
+    /* =========================================================
+       SEARCH + AGGS
+     ========================================================= */
+
+    @PostMapping("/{alias}/{table}/_search")
+    public ResponseEntity<?> search(
+            HttpServletRequest request,
+            @PathVariable String alias,
+            @PathVariable String table,
+            @RequestBody String query
+    ) {
+        TenantContext ctx = tenantResolver.resolve(request, alias);
+
+        DslCommand cmd = DslCommandFactory.search(
+                alias, table, query
+        );
+
+        return ResponseEntity.ok(
+                executionService.execute(ctx, cmd)
+        );
+    }
+
+    /* =========================================================
+       SOFT DELETE
+     ========================================================= */
+
+    @DeleteMapping("/{alias}/{table}/_doc")
+    public ResponseEntity<?> delete(
+            HttpServletRequest request,
+            @PathVariable String alias,
+            @PathVariable String table,
+            @RequestBody String keyJson
+    ) {
+        TenantContext ctx = tenantResolver.resolve(request, alias);
+
+        DslCommand cmd = DslCommandFactory.delete(
+                alias, table, keyJson
+        );
+
+        return ResponseEntity.ok(
+                executionService.execute(ctx, cmd)
+        );
+    }
+}
