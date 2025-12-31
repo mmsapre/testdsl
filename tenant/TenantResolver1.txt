@@ -1,0 +1,104 @@
+package com.mmsapre.platform.tenant;
+
+import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.stereotype.Component;
+
+/**
+ * Resolves TenantContext for each request.
+ *
+ * Resolution priority:
+ *
+ * 1. Explicit path variables (alias, schema)
+ * 2. HTTP headers
+ * 3. Query parameters (last fallback)
+ *
+ * This keeps execution deterministic and REST/DSL compatible.
+ */
+@Component
+public class TenantResolver {
+
+    public static final String HDR_ALIAS  = "X-Datasource-Alias";
+    public static final String HDR_SCHEMA = "X-Tenant-Schema";
+    public static final String HDR_USER   = "X-User";
+
+    /* =========================================================
+       1️⃣ PATH-BASED RESOLUTION (preferred)
+       Used by ES-style REST APIs
+     ========================================================= */
+
+    public TenantContext resolve(
+            HttpServletRequest request,
+            String alias,
+            String schema
+    ) {
+        if (isBlank(alias)) {
+            throw new IllegalArgumentException("Datasource alias not provided");
+        }
+        if (isBlank(schema)) {
+            throw new IllegalArgumentException("Tenant schema not provided");
+        }
+
+        String user = header(request, HDR_USER);
+
+        return TenantContext.of(alias, schema, user);
+    }
+
+    /* =========================================================
+       2️⃣ HEADER / QUERY RESOLUTION
+       Used by raw DSL endpoint
+     ========================================================= */
+
+    public TenantContext resolve(HttpServletRequest request) {
+
+        String alias =
+                firstNonBlank(
+                        header(request, HDR_ALIAS),
+                        request.getParameter("alias")
+                );
+
+        String schema =
+                firstNonBlank(
+                        header(request, HDR_SCHEMA),
+                        request.getParameter("schema"),
+                        header(request, "X-Tenant-Id"),   // backward compat
+                        request.getParameter("tenant")
+                );
+
+        if (isBlank(alias)) {
+            throw new IllegalArgumentException(
+                    "Datasource alias not provided (header or query param)"
+            );
+        }
+        if (isBlank(schema)) {
+            throw new IllegalArgumentException(
+                    "Tenant schema not provided (header or query param)"
+            );
+        }
+
+        String user = header(request, HDR_USER);
+
+        return TenantContext.of(alias, schema, user);
+    }
+
+    /* =========================================================
+       HELPERS
+     ========================================================= */
+
+    private String header(HttpServletRequest req, String name) {
+        String v = req.getHeader(name);
+        return isBlank(v) ? null : v;
+    }
+
+    private boolean isBlank(String s) {
+        return s == null || s.trim().isEmpty();
+    }
+
+    private String firstNonBlank(String... values) {
+        for (String v : values) {
+            if (!isBlank(v)) {
+                return v;
+            }
+        }
+        return null;
+    }
+}
