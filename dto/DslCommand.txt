@@ -1,0 +1,137 @@
+package com.mmsapre.dsl;
+
+import java.util.Objects;
+
+/**
+ * Canonical execution command for the DSL platform.
+ *
+ * This is the ONLY object the execution layer understands.
+ *
+ * Built either by:
+ *  - ANTLR parser (DSL text)
+ *  - REST controller (DslCommandFactory)
+ */
+public final class DslCommand {
+
+    /* =========================================================
+       COMMAND TYPE
+     ========================================================= */
+
+    public enum Type {
+        CREATE,     // create draft schema
+        ALTER,      // alter draft schema
+        APPROVE,    // maker → checker
+        UPSERT,     // SCD2 upsert
+        BULK,       // bulk COPY
+        SEARCH,     // query / aggregations
+        DELETE      // soft delete
+    }
+
+    /* =========================================================
+       FIELDS
+     ========================================================= */
+
+    private final String alias;   // datasource alias
+    private final String table;   // logical table name
+    private final Type type;      // command type
+    private final String json;    // payload (schema / data / query)
+
+    /* =========================================================
+       CONSTRUCTOR (PRIVATE)
+     ========================================================= */
+
+    private DslCommand(Builder b) {
+        this.alias = require(b.alias, "alias");
+        this.table = require(b.table, "table");
+        this.type  = Objects.requireNonNull(b.type, "type");
+        this.json  = b.json; // optional
+    }
+
+    /* =========================================================
+       ACCESSORS
+     ========================================================= */
+
+    public String alias() {
+        return alias;
+    }
+
+    public String table() {
+        return table;
+    }
+
+    public Type type() {
+        return type;
+    }
+
+    public String json() {
+        return json;
+    }
+
+    /* =========================================================
+       VALIDATION
+     ========================================================= */
+
+    private static String require(String v, String name) {
+        if (v == null || v.isBlank()) {
+            throw new IllegalArgumentException(
+                    "DslCommand: '" + name + "' must not be null or blank"
+            );
+        }
+        return v;
+    }
+
+    /* =========================================================
+       BUILDER
+     ========================================================= */
+
+    public static Builder builder() {
+        return new Builder();
+    }
+
+    public static final class Builder {
+
+        private String alias;
+        private String table;
+        private Type type;
+        private String json;
+
+        private Builder() {}
+
+        public Builder alias(String alias) {
+            this.alias = alias;
+            return this;
+        }
+
+        public Builder table(String table) {
+            this.table = table;
+            return this;
+        }
+
+        public Builder type(Type type) {
+            this.type = type;
+            return this;
+        }
+
+        public Builder json(String json) {
+            this.json = json;
+            return this;
+        }
+
+        public DslCommand build() {
+            return new DslCommand(this);
+        }
+    }
+
+    /* =========================================================
+       DEBUG / LOGGING
+     ========================================================= */
+
+    @Override
+    public String toString() {
+        return "DslCommand{" +
+                "type=" + type +
+                ", alias='" + alias + '\'' +
+                ", table='" + table + '\'' +
+                '}';
+    }
+}
