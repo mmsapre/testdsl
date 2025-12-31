@@ -1,0 +1,60 @@
+package com.mmsapre.platform.compat;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.mmsapre.dsl.DslCommand;
+import com.mmsapre.dsl.ast.AstCommand;
+import com.mmsapre.dsl.map.AstToDslCommandMapper;
+import com.mmsapre.dsl.parse.DslAstBuilderVisitor;
+import com.mmsapre.platform.util.JsonUtil;
+
+/**
+ * Compatibility layer:
+ *  - DSL string → AST → DslCommand
+ *  - REST payload → AST → DslCommand
+ */
+public final class DslRestCompatibility {
+
+    private final DslAstBuilderVisitor visitor = new DslAstBuilderVisitor();
+
+    /** DSL text body entry */
+    public DslCommand fromDsl(String dsl) {
+        AstCommand ast = visitor.parseToAst(dsl);
+        return AstToDslCommandMapper.map(ast);
+    }
+
+    /** REST endpoints entry (ES-style) */
+    public DslCommand fromRest(
+            String method,
+            String schema,
+            String table,
+            String operationToken, // null, "_upsert", "_bulk", "_search", "_alter", "_doc"
+            String jsonBody
+    ) {
+
+        AstCommand.Verb verb = switch (method.toUpperCase()) {
+            case "PUT" -> AstCommand.Verb.PUT;
+            case "POST" -> AstCommand.Verb.POST;
+            case "DELETE" -> AstCommand.Verb.DELETE;
+            default -> throw new IllegalArgumentException("Unsupported HTTP method: " + method);
+        };
+
+        AstCommand.Operation op = toOp(operationToken);
+
+        JsonNode payload = (jsonBody == null || jsonBody.isBlank()) ? null : JsonUtil.parse(jsonBody);
+
+        AstCommand ast = new AstCommand(verb, schema, table, op, payload);
+        return AstToDslCommandMapper.map(ast);
+    }
+
+    private static AstCommand.Operation toOp(String token) {
+        if (token == null) return AstCommand.Operation.NONE;
+        return switch (token) {
+            case "_upsert" -> AstCommand.Operation.UPSERT;
+            case "_bulk" -> AstCommand.Operation.BULK;
+            case "_search" -> AstCommand.Operation.SEARCH;
+            case "_alter" -> AstCommand.Operation.ALTER;
+            case "_doc" -> AstCommand.Operation.DOC;
+            default -> throw new IllegalArgumentException("Unknown operation token: " + token);
+        };
+    }
+}
