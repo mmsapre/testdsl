@@ -1,0 +1,40 @@
+package com.mmsapre.platform.sql;
+
+import com.fasterxml.jackson.databind.JsonNode;
+
+import java.util.Iterator;
+import java.util.Map;
+
+public final class AggregationSqlBuilder {
+
+    private AggregationSqlBuilder() {}
+
+    public static String build(
+            String physicalTable,
+            JsonNode aggs,
+            boolean scd2,
+            String activeFlag
+    ) {
+        Iterator<Map.Entry<String, JsonNode>> it = aggs.fields();
+        if (!it.hasNext()) {
+            throw new IllegalArgumentException("Empty aggs");
+        }
+
+        Map.Entry<String, JsonNode> entry = it.next();
+        JsonNode terms = entry.getValue().get("terms");
+
+        String field = terms.get("field").asText();
+
+        return """
+            SELECT %s AS key, COUNT(*) AS doc_count
+            FROM %s
+            %s
+            GROUP BY %s
+        """.formatted(
+                field,
+                physicalTable,
+                scd2 ? "WHERE " + activeFlag + "=true" : "",
+                field
+        );
+    }
+}
