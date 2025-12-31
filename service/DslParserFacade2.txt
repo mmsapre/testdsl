@@ -1,0 +1,119 @@
+package com.mmsapre.dsl;
+
+import com.mmsapre.dsl.antlr4.DslBaseVisitor;
+import com.mmsapre.dsl.antlr4.DslLexer;
+import com.mmsapre.dsl.antlr4.DslParser;
+import org.antlr.v4.runtime.*;
+import org.antlr.v4.runtime.tree.ParseTree;
+
+/**
+ * Facade that converts DSL text into a semantic DslCommand.
+ *
+ * Responsibilities:
+ *  - owns ANTLR
+ *  - builds AST via Visitor
+ *  - emits DslCommand (no grammar leakage)
+ */
+public final class DslParserFacade {
+
+    /* =========================================================
+       PUBLIC API
+     ========================================================= */
+
+    public DslCommand parse(String dsl) {
+        if (dsl == null || dsl.isBlank()) {
+            throw new IllegalArgumentException("DSL must not be empty");
+        }
+
+        ParseTree tree = parseTree(dsl);
+        return new CommandVisitor().visit(tree);
+    }
+
+    /* =========================================================
+       ANTLR BOOTSTRAP
+     ========================================================= */
+
+    private ParseTree parseTree(String dsl) {
+
+        CharStream input = CharStreams.fromString(dsl);
+
+        DslLexer lexer = new DslLexer(input);
+        CommonTokenStream tokens = new CommonTokenStream(lexer);
+        DslParser parser = new DslParser(tokens);
+
+        lexer.removeErrorListeners();
+        parser.removeErrorListeners();
+
+        lexer.addErrorListener(ThrowingErrorListener.INSTANCE);
+        parser.addErrorListener(ThrowingErrorListener.INSTANCE);
+
+        return parser.command();
+    }
+
+    /* =========================================================
+       AST VISITOR
+     ========================================================= */
+
+    private static final class CommandVisitor
+            extends DslBaseVisitor<DslCommand> {
+
+        @Override
+        public DslCommand visitCommand(DslParser.CommandContext ctx) {
+
+            // qualified : ID '.' ID
+            String schema = ctx.qualified().ID(0).getText();
+            String table  = ctx.qualified().ID(1).getText();
+
+            String json =
+                    ctx.json() != null
+                            ? ctx.json().getText()
+                            : null;
+
+            if (ctx.PUT() != null) {
+                return build(schema, table, DslCommand.Type.CREATE, json);
+            }
+
+            if (ctx.POST() != null) {
+
+                if (ctx.UPSERT() != null) {
+                    return build(schema, table, DslCommand.Type.UPSERT, json);
+                }
+                if (ctx.BULK() != null) {
+                    return build(schema, table, DslCommand.Type.BULK, json);
+                }
+                if (ctx.SEARCH() != null) {
+                    return build(schema, table, DslCommand.Type.SEARCH, json);
+                }
+                if (ctx.ALTER() != null) {
+                    return build(schema, table, DslCommand.Type.ALTER, json);
+                }
+            }
+
+            if (ctx.DELETE() != null && ctx.DOC() != null) {
+                return build(schema, table, DslCommand.Type.DELETE, json);
+            }
+
+            if (ctx.APPROVE() != null) {
+                return build(schema, table, DslCommand.Type.APPROVE, null);
+            }
+
+            throw new IllegalArgumentException(
+                    "Unsupported DSL command: " + ctx.getText()
+            );
+        }
+
+        private DslCommand build(
+                String schema,
+                String table,
+                DslCommand.Type type,
+                String json
+        ) {
+            return DslCommand.builder()
+                    .alias(schema)   // schema acts as logical alias
+                    .table(table)
+                    .type(type)
+                    .json(json)
+                    .build();
+        }
+    }
+}
