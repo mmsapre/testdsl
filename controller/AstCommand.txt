@@ -1,0 +1,16 @@
+package com.mmsapre.dsl.ast;
+
+import com.fasterxml.jackson.databind.JsonNode;
+
+public record AstCommand(
+        Verb verb,                // PUT / POST / DELETE / APPROVE
+        String schema,            // from qualified: schema.table
+        String table,
+        Operation op,             // NONE / _upsert / _bulk / _search / _alter / _doc
+        JsonNode payload          // parsed JSON payload (or null)
+) implements AstNode {
+
+    public enum Verb { PUT, POST, DELETE, APPROVE }
+
+    public enum Operation { NONE, UPSERT, BULK, SEARCH, ALTER, DOC }
+}
