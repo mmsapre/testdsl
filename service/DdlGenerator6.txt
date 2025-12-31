@@ -1,0 +1,81 @@
+package com.mmsapre.platform.sql;
+
+import com.fasterxml.jackson.databind.JsonNode;
+
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * Generates physical DDL for versioned tables.
+ */
+public final class DdlGenerator {
+
+    private DdlGenerator() {}
+
+    public static List<String> createTableAndIndexes(
+            String physicalTable,
+            JsonNode schema
+    ) {
+        List<String> ddl = new ArrayList<>();
+        ddl.add(createTableSql(physicalTable, schema));
+        ddl.add(createHashIndexSql(physicalTable));
+        return ddl;
+    }
+
+    private static String createTableSql(
+            String physicalTable,
+            JsonNode schema
+    ) {
+        StringBuilder sb = new StringBuilder();
+
+        sb.append("CREATE TABLE ").append(physicalTable).append(" (\n");
+        sb.append("  _id BIGSERIAL PRIMARY KEY,\n");
+
+        JsonNode cols = schema.get("columns");
+        Iterator<Map.Entry<String, JsonNode>> it = cols.fields();
+
+        while (it.hasNext()) {
+            Map.Entry<String, JsonNode> e = it.next();
+            sb.append("  ")
+              .append(e.getKey())
+              .append(" ")
+              .append(sqlType(e.getValue()))
+              .append(",\n");
+        }
+
+        sb.append("  hash VARCHAR(64) NOT NULL,\n");
+        sb.append("  is_active BOOLEAN NOT NULL,\n");
+        sb.append("  valid_from TIMESTAMP NOT NULL,\n");
+        sb.append("  valid_to TIMESTAMP NOT NULL\n");
+        sb.append(")");
+
+        return sb.toString();
+    }
+
+    private static String createHashIndexSql(String physicalTable) {
+        return """
+            CREATE UNIQUE INDEX ux_%s_hash
+            ON %s (hash)
+            """.formatted(
+                physicalTable.replace('.', '_'),
+                physicalTable
+        );
+    }
+
+    private static String sqlType(JsonNode col) {
+        return switch (col.get("type").asText()) {
+            case "string", "varchar" ->
+                    "VARCHAR(" + col.path("length").asInt(255) + ")";
+            case "bigint" -> "BIGINT";
+            case "int", "integer" -> "INTEGER";
+            case "timestamp" -> "TIMESTAMP";
+            case "boolean" -> "BOOLEAN";
+            case "jsonb" -> "JSONB";
+            default -> throw new IllegalArgumentException(
+                    "Unsupported type: " + col
+            );
+        };
+    }
+}
