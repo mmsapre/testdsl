@@ -1,0 +1,199 @@
+package com.mmsapre.platform.api;
+
+import com.mmsapre.dsl.DslCommand;
+import com.mmsapre.platform.compat.DslRestCompatibility;
+import com.mmsapre.platform.service.DslExecutionService;
+import com.mmsapre.platform.tenant.TenantContext;
+import com.mmsapre.platform.tenant.TenantResolver;
+import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+/**
+ * Unified controller for:
+ *  - Raw DSL execution
+ *  - Elasticsearch-style REST APIs
+ *
+ * Tenant resolution:
+ *  - X-Tenant-Id header → schema
+ *  - datasource alias fixed to pg_main
+ */
+@RestController
+@RequestMapping
+public class DslController {
+
+    private final TenantResolver tenantResolver;
+    private final DslExecutionService executionService;
+    private final DslRestCompatibility restCompat =
+            new DslRestCompatibility();
+
+    public DslController(
+            TenantResolver tenantResolver,
+            DslExecutionService executionService
+    ) {
+        this.tenantResolver = tenantResolver;
+        this.executionService = executionService;
+    }
+
+    /* =========================================================
+       RAW DSL
+     ========================================================= */
+
+    /**
+     * Execute raw DSL text.
+     *
+     * Headers:
+     *  - X-Tenant-Id
+     *
+     * Body:
+     *  PUT treasury.treasury_data WITH {...}
+     */
+    @PostMapping(
+            value = "/_dsl",
+            consumes = MediaType.TEXT_PLAIN_VALUE
+    )
+    public ResponseEntity<?> executeDsl(
+            HttpServletRequest request,
+            @RequestBody String dsl
+    ) {
+        TenantContext ctx = tenantResolver.resolve(request);
+        DslCommand cmd = restCompat.fromDsl(dsl);
+
+        return ResponseEntity.ok(
+                executionService.execute(ctx, cmd)
+        );
+    }
+
+    /* =========================================================
+       REST (ES-STYLE)
+       Base path: /{table}
+       Tenant schema from X-Tenant-Id
+     ========================================================= */
+
+    /**
+     * CREATE (draft)
+     * PUT /treasury_data
+     */
+    @PutMapping("/{table}")
+    public ResponseEntity<?> createDraft(
+            HttpServletRequest request,
+            @PathVariable String table,
+            @RequestBody String body
+    ) {
+        return execRest(request, table, "PUT", null, body);
+    }
+
+    /**
+     * ALTER (draft)
+     * POST /treasury_data/_alter
+     */
+    @PostMapping("/{table}/_alter")
+    public ResponseEntity<?> alterDraft(
+            HttpServletRequest request,
+            @PathVariable String table,
+            @RequestBody String body
+    ) {
+        return execRest(request, table, "POST", "_alter", body);
+    }
+
+    /**
+     * APPROVE
+     * POST /treasury_data/_approve
+     */
+    @PostMapping("/{table}/_approve")
+    public ResponseEntity<?> approve(
+            HttpServletRequest request,
+            @PathVariable String table
+    ) {
+        TenantContext ctx = tenantResolver.resolve(request);
+
+        DslCommand cmd = DslCommand.builder()
+                .type(DslCommand.Type.APPROVE)
+                .table(table)
+                .build();
+
+        return ResponseEntity.ok(
+                executionService.execute(ctx, cmd)
+        );
+    }
+
+    /**
+     * UPSERT
+     * POST /treasury_data/_upsert
+     */
+    @PostMapping("/{table}/_upsert")
+    public ResponseEntity<?> upsert(
+            HttpServletRequest request,
+            @PathVariable String table,
+            @RequestBody String body
+    ) {
+        return execRest(request, table, "POST", "_upsert", body);
+    }
+
+    /**
+     * BULK
+     * POST /treasury_data/_bulk
+     */
+    @PostMapping("/{table}/_bulk")
+    public ResponseEntity<?> bulk(
+            HttpServletRequest request,
+            @PathVariable String table,
+            @RequestBody String body
+    ) {
+        return execRest(request, table, "POST", "_bulk", body);
+    }
+
+    /**
+     * SEARCH
+     * POST /treasury_data/_search
+     */
+    @PostMapping("/{table}/_search")
+    public ResponseEntity<?> search(
+            HttpServletRequest request,
+            @PathVariable String table,
+            @RequestBody String body
+    ) {
+        return execRest(request, table, "POST", "_search", body);
+    }
+
+    /**
+     * SOFT DELETE
+     * DELETE /treasury_data/_doc
+     */
+    @DeleteMapping("/{table}/_doc")
+    public ResponseEntity<?> delete(
+            HttpServletRequest request,
+            @PathVariable String table,
+            @RequestBody String body
+    ) {
+        return execRest(request, table, "DELETE", "_doc", body);
+    }
+
+    /* =========================================================
+       INTERNAL REST → DSL EXECUTION
+     ========================================================= */
+
+    private ResponseEntity<?> execRest(
+            HttpServletRequest request,
+            String table,
+            String method,
+            String action,
+            String body
+    ) {
+        TenantContext ctx = tenantResolver.resolve(request);
+
+        DslCommand cmd =
+                restCompat.fromRest(
+                        method,
+                        ctx.schema(),   // schema from tenant
+                        table,
+                        action,
+                        body
+                );
+
+        return ResponseEntity.ok(
+                executionService.execute(ctx, cmd)
+        );
+    }
+}
