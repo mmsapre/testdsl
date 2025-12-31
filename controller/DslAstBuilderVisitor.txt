@@ -1,0 +1,81 @@
+package com.mmsapre.dsl.parse;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.mmsapre.dsl.ThrowingErrorListener;
+import com.mmsapre.dsl.antlr4.DslBaseVisitor;
+import com.mmsapre.dsl.antlr4.DslLexer;
+import com.mmsapre.dsl.antlr4.DslParser;
+import com.mmsapre.dsl.ast.AstCommand;
+import com.mmsapre.platform.util.JsonUtil;
+import org.antlr.v4.runtime.*;
+
+public final class DslAstBuilderVisitor extends DslBaseVisitor<AstCommand> {
+
+    /** Parse DSL string and return AST. */
+    public AstCommand parseToAst(String dsl) {
+        CharStream input = CharStreams.fromString(dsl);
+
+        DslLexer lexer = new DslLexer(input);
+        DslParser parser = new DslParser(new CommonTokenStream(lexer));
+
+        lexer.removeErrorListeners();
+        parser.removeErrorListeners();
+        lexer.addErrorListener(ThrowingErrorListener.INSTANCE);
+        parser.addErrorListener(ThrowingErrorListener.INSTANCE);
+
+        DslParser.CommandContext ctx = parser.command();
+        return visitCommand(ctx);
+    }
+
+    @Override
+    public AstCommand visitCommand(DslParser.CommandContext ctx) {
+
+        String schema = ctx.qualified().ID(0).getText();
+        String table  = ctx.qualified().ID(1).getText();
+
+        JsonNode payload = null;
+        if (ctx.json() != null) {
+            // ctx.json().getText() is JSON text (because Json grammar)
+            payload = JsonUtil.parse(ctx.json().getText());
+        }
+
+        if (ctx.PUT() != null) {
+            return new AstCommand(
+                    AstCommand.Verb.PUT,
+                    schema,
+                    table,
+                    AstCommand.Operation.NONE,
+                    payload
+            );
+        }
+
+        if (ctx.POST() != null) {
+            if (ctx.UPSERT() != null) return new AstCommand(AstCommand.Verb.POST, schema, table, AstCommand.Operation.UPSERT, payload);
+            if (ctx.BULK() != null)   return new AstCommand(AstCommand.Verb.POST, schema, table, AstCommand.Operation.BULK, payload);
+            if (ctx.SEARCH() != null) return new AstCommand(AstCommand.Verb.POST, schema, table, AstCommand.Operation.SEARCH, payload);
+            if (ctx.ALTER() != null)  return new AstCommand(AstCommand.Verb.POST, schema, table, AstCommand.Operation.ALTER, payload);
+        }
+
+        if (ctx.DELETE() != null && ctx.DOC() != null) {
+            return new AstCommand(
+                    AstCommand.Verb.DELETE,
+                    schema,
+                    table,
+                    AstCommand.Operation.DOC,
+                    payload
+            );
+        }
+
+        if (ctx.APPROVE() != null) {
+            return new AstCommand(
+                    AstCommand.Verb.APPROVE,
+                    schema,
+                    table,
+                    AstCommand.Operation.NONE,
+                    null
+            );
+        }
+
+        throw new IllegalArgumentException("Unsupported DSL command: " + ctx.getText());
+    }
+}
