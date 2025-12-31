@@ -1,0 +1,45 @@
+package com.mmsapre.platform.sql;
+
+public final class SqlIdentifierUtil {
+
+    private SqlIdentifierUtil() {}
+
+    /**
+     * Removes surrounding quotes and duplicate quotes.
+     *
+     * Examples:
+     *   "treasury"           -> treasury
+     *   ""treasury""         -> treasury
+     *   "treasury"."table"   -> treasury.table
+     */
+    public static String normalize(String identifier) {
+        if (identifier == null) {
+            return null;
+        }
+
+        String s = identifier.trim();
+
+        // remove repeated quotes
+        while (s.startsWith("\"") && s.endsWith("\"")) {
+            s = s.substring(1, s.length() - 1).trim();
+        }
+
+        // remove quotes around dot-separated identifiers
+        s = s.replace("\".\"", ".");
+
+        // remove any remaining quotes
+        s = s.replace("\"", "");
+
+        return s;
+    }
+
+    /**
+     * Safe index-name sanitiser.
+     * Ensures valid PostgreSQL identifier.
+     */
+    public static String toIndexName(String raw) {
+        return normalize(raw)
+                .replaceAll("[^a-zA-Z0-9_]", "_")
+                .toLowerCase();
+    }
+}
