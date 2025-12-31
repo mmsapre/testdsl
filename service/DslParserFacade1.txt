@@ -1,0 +1,147 @@
+package com.mmsapre.dsl;
+
+import com.mmsapre.dsl.antlr4.CreateDslLexer;
+import com.mmsapre.dsl.antlr4.CreateDslParser;
+import org.antlr.v4.runtime.*;
+import org.antlr.v4.runtime.tree.ParseTree;
+
+/**
+ * Facade hiding ANTLR grammar details.
+ *
+ * Responsibility:
+ *  - Parse DSL text
+ *  - Convert parse tree into DslCommand
+ *
+ * NOTHING outside this class should depend on ANTLR.
+ */
+public class DslParserFacade {
+
+    /* =========================================================
+       PUBLIC ENTRY
+     ========================================================= */
+
+    public DslCommand parse(String dsl) {
+        if (dsl == null || dsl.isBlank()) {
+            throw new IllegalArgumentException("DSL text must not be empty");
+        }
+
+        CreateDslParser.CommandContext ctx = parseInternal(dsl);
+
+        return buildCommand(ctx);
+    }
+
+    /* =========================================================
+       ANTLR PARSING
+     ========================================================= */
+
+    private CreateDslParser.CommandContext parseInternal(String dsl) {
+
+        CharStream input = CharStreams.fromString(dsl);
+
+        CreateDslLexer lexer = new CreateDslLexer(input);
+        CommonTokenStream tokens = new CommonTokenStream(lexer);
+        CreateDslParser parser = new CreateDslParser(tokens);
+
+        parser.removeErrorListeners();
+        parser.addErrorListener(ThrowingErrorListener.INSTANCE);
+
+        return parser.command();
+    }
+
+    /* =========================================================
+       DSL → COMMAND MAPPING
+     ========================================================= */
+
+    private DslCommand buildCommand(
+            CreateDslParser.CommandContext ctx
+    ) {
+
+        // Example grammar entry:
+        // CREATE TABLE treasury_data WITH { ... }
+
+        if (ctx.CREATE() != null) {
+            return DslCommand.builder()
+                    .type(DslCommand.Type.CREATE)
+                    .table(ctx.ID().getText())
+                    .json(ctx.json().getText())
+                    .build();
+        }
+
+        if (ctx.ALTER() != null) {
+            return DslCommand.builder()
+                    .type(DslCommand.Type.ALTER)
+                    .table(ctx.ID().getText())
+                    .json(ctx.json().getText())
+                    .build();
+        }
+
+        if (ctx.APPROVE() != null) {
+            return DslCommand.builder()
+                    .type(DslCommand.Type.APPROVE)
+                    .table(ctx.ID().getText())
+                    .build();
+        }
+
+        if (ctx.UPSERT() != null) {
+            return DslCommand.builder()
+                    .type(DslCommand.Type.UPSERT)
+                    .table(ctx.ID().getText())
+                    .json(ctx.json().getText())
+                    .build();
+        }
+
+        if (ctx.BULK() != null) {
+            return DslCommand.builder()
+                    .type(DslCommand.Type.BULK)
+                    .table(ctx.ID().getText())
+                    .json(ctx.json().getText())
+                    .build();
+        }
+
+        if (ctx.SEARCH() != null) {
+            return DslCommand.builder()
+                    .type(DslCommand.Type.SEARCH)
+                    .table(ctx.ID().getText())
+                    .json(ctx.json().getText())
+                    .build();
+        }
+
+        if (ctx.DELETE() != null) {
+            return DslCommand.builder()
+                    .type(DslCommand.Type.DELETE)
+                    .table(ctx.ID().getText())
+                    .json(ctx.json().getText())
+                    .build();
+        }
+
+        throw new IllegalArgumentException(
+                "Unsupported DSL command: " + ctx.getText()
+        );
+    }
+
+    /* =========================================================
+       ERROR HANDLING
+     ========================================================= */
+
+    private static class ThrowingErrorListener
+            extends BaseErrorListener {
+
+        static final ThrowingErrorListener INSTANCE =
+                new ThrowingErrorListener();
+
+        @Override
+        public void syntaxError(
+                Recognizer<?, ?> recognizer,
+                Object offendingSymbol,
+                int line,
+                int charPositionInLine,
+                String msg,
+                RecognitionException e
+        ) {
+            throw new IllegalArgumentException(
+                    "DSL syntax error at line " + line +
+                            ":" + charPositionInLine + " → " + msg
+            );
+        }
+    }
+}
