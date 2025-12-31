@@ -1,0 +1,4 @@
+package com.mmsapre.dsl.ast;
+
+public sealed interface AstNode permits AstCommand {
+}
