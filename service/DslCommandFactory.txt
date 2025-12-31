@@ -1,0 +1,77 @@
+package com.mmsapre.platform.api;
+
+import com.mmsapre.dsl.DslCommand;
+
+public final class DslCommandFactory {
+
+    private DslCommandFactory() {}
+
+    public static DslCommand create(
+            String alias,
+            String table,
+            String json
+    ) {
+        return base(alias, table, DslCommand.Type.CREATE, json);
+    }
+
+    public static DslCommand alter(
+            String alias,
+            String table,
+            String json
+    ) {
+        return base(alias, table, DslCommand.Type.ALTER, json);
+    }
+
+    public static DslCommand approve(
+            String alias,
+            String table
+    ) {
+        return base(alias, table, DslCommand.Type.APPROVE, null);
+    }
+
+    public static DslCommand upsert(
+            String alias,
+            String table,
+            String json
+    ) {
+        return base(alias, table, DslCommand.Type.UPSERT, json);
+    }
+
+    public static DslCommand bulk(
+            String alias,
+            String table,
+            String json
+    ) {
+        return base(alias, table, DslCommand.Type.BULK, json);
+    }
+
+    public static DslCommand search(
+            String alias,
+            String table,
+            String json
+    ) {
+        return base(alias, table, DslCommand.Type.SEARCH, json);
+    }
+
+    public static DslCommand delete(
+            String alias,
+            String table,
+            String json
+    ) {
+        return base(alias, table, DslCommand.Type.DELETE, json);
+    }
+
+    private static DslCommand base(
+            String alias,
+            String table,
+            DslCommand.Type type,
+            String json
+    ) {
+        return DslCommand.builder()
+                .alias(alias)
+                .table(table)
+                .type(type)
+                .json(json)
+                .build();
+    }
+}
