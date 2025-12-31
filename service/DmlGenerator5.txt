@@ -1,0 +1,149 @@
+package com.mmsapre.platform.sql;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.mmsapre.platform.util.JsonUtil;
+
+import java.sql.Timestamp;
+import java.time.Instant;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.Map;
+import java.util.stream.Collectors;
+
+/**
+ * Generates schema-qualified DML.
+ */
+public final class DmlGenerator {
+
+    private DmlGenerator() {}
+
+    /* =========================================================
+       INSERT (DEDUP)
+     ========================================================= */
+
+    public static SqlAndParams insert(
+            String physicalTable,
+            JsonNode record,
+            String hash
+    ) {
+        Map<String, Object> params = new HashMap<>();
+
+        record.fields().forEachRemaining(e ->
+                params.put(e.getKey(), JsonUtil.value(e.getValue()))
+        );
+
+        params.put("hash", hash);
+        params.put("is_active", true);
+        params.put("valid_from", Timestamp.from(Instant.now()));
+        params.put("valid_to", Timestamp.valueOf("9999-12-31 00:00:00"));
+
+        String cols = String.join(", ", params.keySet());
+        String vals = params.keySet().stream()
+                .map(k -> ":" + k)
+                .collect(Collectors.joining(", "));
+
+        String sql = """
+            INSERT INTO %s (%s)
+            VALUES (%s)
+            ON CONFLICT (hash) DO NOTHING
+            """.formatted(physicalTable, cols, vals);
+
+        return new SqlAndParams(sql, params);
+    }
+
+    /* =========================================================
+       EXPIRE ACTIVE (SCD-2)
+     ========================================================= */
+
+    public static SqlAndParams expireActive(
+            String physicalTable,
+            String hash,
+            String activeFlag,
+            String endCol
+    ) {
+        String sql = """
+            UPDATE %s
+            SET %s=false,
+                %s=now()
+            WHERE hash=:hash
+              AND %s=true
+            """.formatted(
+                physicalTable,
+                activeFlag,
+                endCol,
+                activeFlag
+        );
+
+        return new SqlAndParams(sql, Map.of("hash", hash));
+    }
+
+    /* =========================================================
+       SOFT DELETE
+     ========================================================= */
+
+    public static SqlAndParams softDelete(
+            String physicalTable,
+            String hash,
+            boolean scd2,
+            String activeFlag,
+            String endCol
+    ) {
+        if (!scd2) {
+            throw new IllegalStateException("Soft delete requires SCD-2");
+        }
+        return expireActive(physicalTable, hash, activeFlag, endCol);
+    }
+
+    /* =========================================================
+       SEARCH
+     ========================================================= */
+
+    public static String selectHitsSql(
+            String physicalTable,
+            JsonNode where,
+            boolean scd2,
+            String activeFlag,
+            String startCol,
+            String endCol,
+            String asOf,
+            int size,
+            int from
+    ) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("SELECT * FROM ").append(physicalTable);
+
+        boolean first = true;
+        if (scd2 || (where != null && where.fields().hasNext()) || asOf != null) {
+            sb.append(" WHERE ");
+        }
+
+        if (scd2) {
+            sb.append(activeFlag).append("=true");
+            first = false;
+        }
+
+        if (asOf != null) {
+            if (!first) sb.append(" AND ");
+            sb.append(":asOf BETWEEN ")
+              .append(startCol)
+              .append(" AND ")
+              .append(endCol);
+            first = false;
+        }
+
+        if (where != null) {
+            Iterator<Map.Entry<String, JsonNode>> it = where.fields();
+            while (it.hasNext()) {
+                Map.Entry<String, JsonNode> e = it.next();
+                if (!first) sb.append(" AND ");
+                sb.append(e.getKey()).append("=:").append(e.getKey());
+                first = false;
+            }
+        }
+
+        sb.append(" LIMIT ").append(size);
+        sb.append(" OFFSET ").append(from);
+
+        return sb.toString();
+    }
+}
