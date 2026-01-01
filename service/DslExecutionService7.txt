@@ -1,0 +1,373 @@
+package com.mmsapre.platform.service;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.mmsapre.dsl.DslCommand;
+import com.mmsapre.platform.registry.SchemaRegistryDao;
+import com.mmsapre.platform.sql.*;
+import com.mmsapre.platform.tenant.TenantContext;
+import com.mmsapre.platform.util.JsonUtil;
+import com.mmsapre.platform.validation.JsonLogicValidationService;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
+import org.springframework.stereotype.Service;
+
+import java.time.Instant;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * Central execution engine.
+ *
+ * Responsibilities:
+ *  - tenant isolation
+ *  - schema registry (maker-checker)
+ *  - schema-driven DDL & DML
+ *  - SCD-2 lifecycle
+ *  - deduplication via hash
+ *  - prepared-statement execution only
+ */
+@Service
+public class DslExecutionService {
+
+    private final JdbcResolver jdbcResolver;
+    private final SchemaRegistryDao registryDao;
+    private final BulkService bulkService;
+    private final HashService hashService;
+    private final JsonLogicValidationService validationService;
+
+    public DslExecutionService(
+            JdbcResolver jdbcResolver,
+            SchemaRegistryDao registryDao,
+            BulkService bulkService,
+            HashService hashService,
+            JsonLogicValidationService validationService
+    ) {
+        this.jdbcResolver = jdbcResolver;
+        this.registryDao = registryDao;
+        this.bulkService = bulkService;
+        this.hashService = hashService;
+        this.validationService = validationService;
+    }
+
+    /* =========================================================
+       ENTRY POINT
+     ========================================================= */
+
+    public Object execute(TenantContext ctx, DslCommand cmd) {
+
+        JdbcTemplate jdbc = jdbcResolver.jdbc(ctx.alias());
+
+        // ensure platform tables exist
+        registryDao.ensure(jdbc);
+
+        return switch (cmd.type()) {
+
+            case CREATE -> createDraft(jdbc, ctx, cmd.table(), cmd.json());
+            case ALTER  -> createDraft(jdbc, ctx, cmd.table(), cmd.json());
+            case APPROVE -> approve(jdbc, ctx, cmd.table());
+
+            case UPSERT -> upsert(jdbc, ctx, cmd.table(), cmd.json());
+            case BULK   -> bulk(jdbc, ctx, cmd.table(), cmd.json());
+
+            case SEARCH -> search(jdbc, ctx, cmd.table(), cmd.json());
+            case DELETE -> softDelete(jdbc, ctx, cmd.table(), cmd.json());
+        };
+    }
+
+    /* =========================================================
+       DRAFT / APPROVE (MAKER–CHECKER)
+     ========================================================= */
+
+    private Object createDraft(
+            JdbcTemplate jdbc,
+            TenantContext ctx,
+            String table,
+            String json
+    ) {
+        JsonNode schema = JsonUtil.parse(json);
+        int version = registryDao.nextVersion(jdbc, ctx, table);
+
+        registryDao.saveDraft(jdbc, ctx, table, version, schema);
+
+        return Map.of(
+                "status", "DRAFT",
+                "tenant", ctx.schema(),
+                "table", table,
+                "version", version
+        );
+    }
+
+    private Object approve(
+            JdbcTemplate jdbc,
+            TenantContext ctx,
+            String table
+    ) {
+        Map<String, Object> draft =
+                registryDao.latestDraft(jdbc, ctx, table);
+
+        if (draft == null) {
+            throw new IllegalStateException(
+                    "No DRAFT schema for table: " + table
+            );
+        }
+
+        int version = (int) draft.get("version");
+        JsonNode schemaJson =
+                JsonUtil.parse(draft.get("schema_json").toString());
+
+        String physical =
+                SqlNames.versioned(ctx.schema(), table, version);
+
+        List<String> ddls =
+                DdlGenerator.createTableAndIndexes(
+                        physical,
+                        schemaJson
+                );
+
+        ddls.forEach(jdbc::execute);
+
+        registryDao.activate(jdbc, ctx, table, version);
+
+        return Map.of(
+                "status", "ACTIVE",
+                "tenant", ctx.schema(),
+                "table", table,
+                "physical_table", physical,
+                "version", version
+        );
+    }
+
+    /* =========================================================
+       UPSERT (SCD-2 + DEDUP + VALIDATION)
+     ========================================================= */
+
+    private Object upsert(
+            JdbcTemplate jdbc,
+            TenantContext ctx,
+            String table,
+            String json
+    ) {
+        JsonNode payload = JsonUtil.parse(json);
+        JsonNode record = payload.get("record");
+
+        Map<String, Object> active =
+                registryDao.active(jdbc, ctx, table);
+
+        JsonNode schemaJson =
+                JsonUtil.parse(active.get("schema_json").toString());
+
+        int version = (int) active.get("version");
+
+        String physical =
+                SqlNames.versioned(ctx.schema(), table, version);
+
+        // ---- validation (view registry)
+        Map<String, JsonNode> validations =
+                registryDao.loadActiveValidations(
+                        jdbc, ctx, table
+                );
+
+        validationService.validateRecord(record, validations);
+
+        // ---- hash
+        String hash =
+                hashService.computeHash(
+                        record,
+                        schemaJson.path("hash_keys"),
+                        schemaJson.path("columns")
+                );
+
+        JsonNode scd = schemaJson.path("scd");
+        boolean scd2 = scd.path("type").asInt(0) == 2;
+
+        String activeFlag =
+                scd.path("active_flag").asText("is_active");
+        String endCol =
+                scd.path("end_date").asText("valid_to");
+
+        if (scd2) {
+            SqlAndParams expire =
+                    DmlGenerator.expireActive(
+                            physical,
+                            hash,
+                            activeFlag,
+                            endCol
+                    );
+            jdbc.update(expire.sql(), expire.params());
+        }
+
+        SqlAndParams insert =
+                DmlGenerator.insert(
+                        physical,
+                        record,
+                        hash,
+                        schemaJson
+                );
+
+        jdbc.update(insert.sql(), insert.params());
+
+        return Map.of(
+                "result", "UPSERT_OK",
+                "tenant", ctx.schema(),
+                "table", table
+        );
+    }
+
+    /* =========================================================
+       BULK (COPY)
+     ========================================================= */
+
+    private Object bulk(
+            JdbcTemplate jdbc,
+            TenantContext ctx,
+            String table,
+            String json
+    ) {
+        JsonNode payload = JsonUtil.parse(json);
+
+        Map<String, Object> active =
+                registryDao.active(jdbc, ctx, table);
+
+        JsonNode schemaJson =
+                JsonUtil.parse(active.get("schema_json").toString());
+
+        int version = (int) active.get("version");
+
+        String physical =
+                SqlNames.versioned(ctx.schema(), table, version);
+
+        try {
+            int count =
+                    bulkService.bulkCopy(
+                            jdbc,
+                            ctx,
+                            physical,
+                            schemaJson,
+                            payload
+                    );
+
+            return Map.of(
+                    "inserted", count,
+                    "tenant", ctx.schema(),
+                    "table", table
+            );
+
+        } catch (Exception e) {
+            throw new RuntimeException(
+                    "Bulk COPY failed", e
+            );
+        }
+    }
+
+    /* =========================================================
+       SEARCH (TENANT + ACTIVE ENFORCED)
+     ========================================================= */
+
+    private Object search(
+            JdbcTemplate jdbc,
+            TenantContext ctx,
+            String table,
+            String json
+    ) {
+        JsonNode payload = JsonUtil.parse(json);
+        JsonNode where = payload.path("query");
+
+        Map<String, Object> active =
+                registryDao.active(jdbc, ctx, table);
+
+        JsonNode schemaJson =
+                JsonUtil.parse(active.get("schema_json").toString());
+
+        int version = (int) active.get("version");
+
+        String physical =
+                SqlNames.versioned(ctx.schema(), table, version);
+
+        JsonNode scd = schemaJson.path("scd");
+        boolean scd2 = scd.path("type").asInt(0) == 2;
+
+        String activeFlag =
+                scd.path("active_flag").asText("is_active");
+
+        SqlAndParams sp =
+                DmlGenerator.select(
+                        physical,
+                        ctx.schema(),           // tenant
+                        where,
+                        schemaJson,
+                        scd2,
+                        activeFlag,
+                        "valid_from",
+                        "valid_to",
+                        payload.path("as_of").asText(null),
+                        payload.path("size").asInt(10),
+                        payload.path("from").asInt(0)
+                );
+
+        NamedParameterJdbcTemplate np =
+                new NamedParameterJdbcTemplate(jdbc);
+
+        return np.queryForList(
+                sp.sql(),
+                sp.params()
+        );
+    }
+
+    /* =========================================================
+       SOFT DELETE
+     ========================================================= */
+
+    private Object softDelete(
+            JdbcTemplate jdbc,
+            TenantContext ctx,
+            String table,
+            String json
+    ) {
+        JsonNode payload = JsonUtil.parse(json);
+        JsonNode businessKey = payload.get("business_key");
+
+        Map<String, Object> active =
+                registryDao.active(jdbc, ctx, table);
+
+        JsonNode schemaJson =
+                JsonUtil.parse(active.get("schema_json").toString());
+
+        int version = (int) active.get("version");
+
+        String physical =
+                SqlNames.versioned(ctx.schema(), table, version);
+
+        String hash =
+                hashService.computeHash(
+                        businessKey,
+                        schemaJson.path("hash_keys"),
+                        schemaJson.path("columns")
+                );
+
+        String activeFlag =
+                schemaJson.path("scd")
+                        .path("active_flag")
+                        .asText("is_active");
+
+        String endCol =
+                schemaJson.path("scd")
+                        .path("end_date")
+                        .asText("valid_to");
+
+        SqlAndParams sp =
+                DmlGenerator.softDelete(
+                        physical,
+                        hash,
+                        activeFlag,
+                        endCol
+                );
+
+        jdbc.update(sp.sql(), sp.params());
+
+        return Map.of(
+                "deleted", true,
+                "tenant", ctx.schema(),
+                "timestamp", Instant.now()
+        );
+    }
+}
