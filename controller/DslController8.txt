@@ -141,6 +141,37 @@ public class DslController {
         return execRest(request, alias, schema, table, "POST", "_upsert", body);
     }
 
+   @PostMapping("/{alias}/{schema}/{table}/_upsert")
+    public Object upsert(
+            @PathVariable String alias,
+            @PathVariable String schema,
+            @PathVariable String table,
+            @RequestBody String body,
+            HttpServletRequest request
+    ) {
+        TenantContext ctx = tenantResolver.resolve(request, alias, schema);
+
+        JsonNode payload = JsonUtil.parse(body);
+        JsonNode record = payload.path("record");
+
+        if (record.isMissingNode()) {
+            throw new IllegalArgumentException("Missing 'record'");
+        }
+
+        JdbcTemplate jdbc = executionService.jdbc(ctx);
+
+        Map<String, JsonNode> validations =
+                viewRegistryDao.activeValidations(
+                        jdbc,
+                        ctx.schema(),
+                        table
+                );
+
+        validationService.validateRecord(record, validations);
+
+        return executionService.upsert(ctx, table, payload);
+    }
+
     /**
      * BULK
      * POST /{alias}/{schema}/{table}/_bulk
