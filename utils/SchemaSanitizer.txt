@@ -32,23 +32,22 @@ public final class SchemaSanitizer {
      * Everything else is removed.
      * Example: keep only "view"
      */
-    public static JsonNode keepOnlyNodes(
-            JsonNode schema,
-            Collection<String> nodesToKeep
-    ) {
-        if (schema == null || !schema.isObject()) {
-            return schema;
-        }
-
-        ObjectNode copy = schema.deepCopy();
-        Set<String> fieldNames =
-                Set.copyOf(copy.fieldNames()::forEachRemaining);
-
-        for (String field : fieldNames) {
-            if (!nodesToKeep.contains(field)) {
-                copy.remove(field);
-            }
-        }
-        return copy;
+    public static JsonNode keepOnlyNodes(JsonNode schema, Collection<String> nodesToKeep) {
+    if (schema == null || !schema.isObject()) {
+        return schema;
     }
+
+    ObjectNode copy = schema.deepCopy();
+
+    // Collect field names first (avoid concurrent modification while removing)
+    Set<String> fieldNames = new HashSet<>();
+    copy.fieldNames().forEachRemaining(fieldNames::add);
+
+    for (String field : fieldNames) {
+        if (!nodesToKeep.contains(field)) {
+            copy.remove(field);
+        }
+    }
+    return copy;
+}
 }
