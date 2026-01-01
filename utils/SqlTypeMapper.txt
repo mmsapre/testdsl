@@ -1,0 +1,46 @@
+package com.mmsapre.platform.sql;
+
+import com.fasterxml.jackson.databind.JsonNode;
+
+import java.sql.Timestamp;
+import java.time.Instant;
+
+public final class SqlTypeMapper {
+
+    private SqlTypeMapper() {}
+
+    public static Object toJdbcValue(
+            JsonNode value,
+            String sqlType
+    ) {
+        if (value == null || value.isNull()) {
+            return null;
+        }
+
+        return switch (sqlType.toLowerCase()) {
+
+            case "boolean" ->
+                    value.asBoolean();
+
+            case "varchar", "text", "string" ->
+                    value.asText();
+
+            case "int", "integer" ->
+                    value.asInt();
+
+            case "bigint", "long" ->
+                    value.asLong();
+
+            case "timestamp", "timestamptz" ->
+                    Timestamp.from(Instant.parse(value.asText()));
+
+            case "jsonb" ->
+                    value.toString(); // bind as JSON text
+
+            default ->
+                    throw new IllegalArgumentException(
+                        "Unsupported SQL type: " + sqlType
+                    );
+        };
+    }
+}
