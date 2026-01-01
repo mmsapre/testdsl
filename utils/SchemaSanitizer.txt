@@ -1,0 +1,29 @@
+package com.mmsapre.platform.util;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+
+public final class SchemaSanitizer {
+
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+
+    private SchemaSanitizer() {}
+
+    /**
+     * Removes the "view" node from schema JSON.
+     *
+     * Original JsonNode is NOT mutated.
+     */
+    public static JsonNode removeViewNode(JsonNode schema) {
+
+        if (schema == null || !schema.isObject()) {
+            return schema;
+        }
+
+        ObjectNode copy = schema.deepCopy();
+        copy.remove("view");
+
+        return copy;
+    }
+}
