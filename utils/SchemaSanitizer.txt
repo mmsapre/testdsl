@@ -1,29 +1,54 @@
 package com.mmsapre.platform.util;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
-public final class SchemaSanitizer {
+import java.util.Collection;
+import java.util.Set;
 
-    private static final ObjectMapper MAPPER = new ObjectMapper();
+public final class SchemaSanitizer {
 
     private SchemaSanitizer() {}
 
     /**
-     * Removes the "view" node from schema JSON.
-     *
-     * Original JsonNode is NOT mutated.
+     * Remove given node names from schema.
+     * Example: remove "view"
      */
-    public static JsonNode removeViewNode(JsonNode schema) {
-
+    public static JsonNode removeNodes(
+            JsonNode schema,
+            Collection<String> nodesToRemove
+    ) {
         if (schema == null || !schema.isObject()) {
             return schema;
         }
 
         ObjectNode copy = schema.deepCopy();
-        copy.remove("view");
+        nodesToRemove.forEach(copy::remove);
+        return copy;
+    }
 
+    /**
+     * Keep ONLY the given node names.
+     * Everything else is removed.
+     * Example: keep only "view"
+     */
+    public static JsonNode keepOnlyNodes(
+            JsonNode schema,
+            Collection<String> nodesToKeep
+    ) {
+        if (schema == null || !schema.isObject()) {
+            return schema;
+        }
+
+        ObjectNode copy = schema.deepCopy();
+        Set<String> fieldNames =
+                Set.copyOf(copy.fieldNames()::forEachRemaining);
+
+        for (String field : fieldNames) {
+            if (!nodesToKeep.contains(field)) {
+                copy.remove(field);
+            }
+        }
         return copy;
     }
 }
