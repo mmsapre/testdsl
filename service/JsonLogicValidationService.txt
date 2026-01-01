@@ -1,0 +1,42 @@
+package com.mmsapre.platform.validation;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.mmsapre.platform.util.JsonUtil;
+import io.github.jamsesso.jsonlogic.JsonLogic;
+import org.springframework.stereotype.Service;
+
+import java.util.Iterator;
+import java.util.Map;
+
+@Service
+public class JsonLogicValidationService {
+
+    private final JsonLogic jsonLogic = new JsonLogic();
+
+    /**
+     * Validates a single record against JSONLogic rules.
+     */
+    public void validateRecord(
+            JsonNode record,
+            Map<String, JsonNode> validations
+    ) {
+        if (validations == null || validations.isEmpty()) {
+            return;
+        }
+
+        Object data = JsonUtil.unwrap(record);
+
+        for (Map.Entry<String, JsonNode> entry : validations.entrySet()) {
+            String field = entry.getKey();
+            JsonNode rule = entry.getValue();
+
+            Object result = jsonLogic.apply(rule, data);
+
+            if (!(result instanceof Boolean) || !((Boolean) result)) {
+                throw new IllegalArgumentException(
+                        "Validation failed for field: " + field
+                );
+            }
+        }
+    }
+}
