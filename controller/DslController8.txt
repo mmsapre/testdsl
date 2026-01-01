@@ -217,6 +217,24 @@ public class DslController {
         return execRest(request, alias, schema, table, "DELETE", "_doc", body);
     }
 
+
+@GetMapping("/{alias}/{schema}/{table}/_view")
+public Object viewSchema(
+        @PathVariable String alias,
+        @PathVariable String schema,
+        @PathVariable String table,
+        HttpServletRequest request
+) {
+    TenantContext ctx = tenantResolver.resolve(request, alias, schema);
+    JdbcTemplate jdbc = executionService.jdbc(ctx);
+
+    return viewRegistryDao.activeViewTags(
+            jdbc,
+            ctx.schema(),
+            table
+    );
+}
+
     /* =========================================================
        INTERNAL REST → DSL EXECUTION
      ========================================================= */
