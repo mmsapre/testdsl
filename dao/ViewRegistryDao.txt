@@ -1,0 +1,40 @@
+package com.mmsapre.platform.registry;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.mmsapre.platform.util.JsonUtil;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Repository;
+
+import java.util.HashMap;
+import java.util.Map;
+
+@Repository
+public class ViewRegistryDao {
+
+    public Map<String, JsonNode> activeValidations(
+            JdbcTemplate jdbc,
+            String tenant,
+            String table
+    ) {
+        Map<String, JsonNode> result = new HashMap<>();
+
+        jdbc.query("""
+            SELECT column_name, validation_json
+            FROM platform_view_registry
+            WHERE tenant = ?
+              AND table_name = ?
+              AND active = true
+        """,
+        rs -> {
+            result.put(
+                    rs.getString("column_name"),
+                    JsonUtil.parse(rs.getString("validation_json"))
+            );
+        },
+        tenant,
+        table
+        );
+
+        return result;
+    }
+}
