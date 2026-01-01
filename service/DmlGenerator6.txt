@@ -75,16 +75,22 @@ public final class DmlGenerator {
 
     public static SqlAndParams expireActive(
             String physicalTable,
+            String tenant,
             String hash,
             String activeFlag,
             String endCol
     ) {
+        // NOTE:
+        //  - :tenant and :hash are NOT quoted
+        //  - JDBC binds them safely
+
         String sql = """
             UPDATE %s
-            SET %s=false,
-                %s=now()
-            WHERE hash=:hash
-              AND %s=true
+               SET %s = false,
+                   %s = now()
+             WHERE tenant = :tenant
+               AND hash   = :hash
+               AND %s     = true
         """.formatted(
                 physicalTable,
                 activeFlag,
@@ -92,20 +98,31 @@ public final class DmlGenerator {
                 activeFlag
         );
 
-        return new SqlAndParams(sql, Map.of("hash", hash));
+        Map<String, Object> params = new LinkedHashMap<>();
+        params.put("tenant", tenant); // String
+        params.put("hash", hash);     // String
+
+        return new SqlAndParams(sql, params);
     }
 
     /* =========================================================
-       SOFT DELETE
+       SOFT DELETE (alias for expireActive)
      ========================================================= */
 
     public static SqlAndParams softDelete(
             String physicalTable,
+            String tenant,
             String hash,
             String activeFlag,
             String endCol
     ) {
-        return expireActive(physicalTable, hash, activeFlag, endCol);
+        return expireActive(
+                physicalTable,
+                tenant,
+                hash,
+                activeFlag,
+                endCol
+        );
     }
 
     /* =========================================================
