@@ -1,0 +1,266 @@
+package com.mmsapre.platform.registry;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.mmsapre.platform.tenant.TenantContext;
+import com.mmsapre.platform.util.JsonUtil;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Repository;
+
+import java.util.HashMap;
+import java.util.Map;
+
+@Repository
+public class SchemaRegistryDao {
+
+    /* =========================================================
+       ENSURE TABLES
+     ========================================================= */
+
+    public void ensure(JdbcTemplate jdbc) {
+
+        jdbc.execute("""
+            CREATE TABLE IF NOT EXISTS platform_schema_registry (
+                id bigserial primary key,
+                tenant varchar(100),
+                table_name varchar(200),
+                version int,
+                status varchar(20),
+                schema_json jsonb,
+                created_by varchar(100),
+                created_at timestamptz default now(),
+                approved_by varchar(100),
+                approved_at timestamptz,
+                unique (tenant, table_name, version)
+            )
+        """);
+
+        jdbc.execute("""
+            CREATE TABLE IF NOT EXISTS platform_view_registry (
+                id bigserial primary key,
+                tenant varchar(100),
+                table_name varchar(200),
+                column_name varchar(200),
+                view_json jsonb,
+                version int,
+                active boolean default true,
+                created_by varchar(100),
+                created_at timestamptz default now(),
+                unique (tenant, table_name, column_name, version)
+            )
+        """);
+    }
+
+    /* =========================================================
+       VERSIONING
+     ========================================================= */
+
+    public int nextVersion(
+            JdbcTemplate jdbc,
+            TenantContext ctx,
+            String table
+    ) {
+        Integer v = jdbc.queryForObject("""
+            SELECT COALESCE(MAX(version), 0)
+            FROM platform_schema_registry
+            WHERE tenant = ?
+              AND table_name = ?
+        """,
+        Integer.class,
+        ctx.schema(),
+        table
+        );
+
+        return (v == null ? 1 : v + 1);
+    }
+
+    /* =========================================================
+       SAVE DRAFT (SCHEMA + VIEW TAGS)
+     ========================================================= */
+
+    public void saveDraft(
+            JdbcTemplate jdbc,
+            TenantContext ctx,
+            String table,
+            int version,
+            JsonNode schema
+    ) {
+        // 1️⃣ Save schema
+        jdbc.update("""
+            INSERT INTO platform_schema_registry
+            (tenant, table_name, version, status, schema_json, created_by)
+            VALUES (?, ?, ?, 'DRAFT', ?::jsonb, ?)
+        """,
+        ctx.schema(),
+        table,
+        version,
+        schema.toString(),
+        ctx.user()
+        );
+
+        // 2️⃣ Save view tags (if present)
+        JsonNode viewTags = schema.path("view_tags");
+        if (viewTags.isObject()) {
+            saveViewTags(jdbc, ctx, table, version, viewTags);
+        }
+    }
+
+    private void saveViewTags(
+            JdbcTemplate jdbc,
+            TenantContext ctx,
+            String table,
+            int version,
+            JsonNode viewTags
+    ) {
+        viewTags.fields().forEachRemaining(e -> {
+            jdbc.update("""
+                INSERT INTO platform_view_registry
+                (tenant, table_name, column_name, view_json, version, created_by)
+                VALUES (?, ?, ?, ?::jsonb, ?, ?)
+            """,
+            ctx.schema(),
+            table,
+            e.getKey(),
+            e.getValue().toString(),
+            version,
+            ctx.user()
+            );
+        });
+    }
+
+    /* =========================================================
+       ACTIVATE (MAKER–CHECKER)
+     ========================================================= */
+
+    public void activate(
+            JdbcTemplate jdbc,
+            TenantContext ctx,
+            String table,
+            int version
+    ) {
+        // Deactivate old schema
+        jdbc.update("""
+            UPDATE platform_schema_registry
+            SET status = 'INACTIVE'
+            WHERE tenant = ?
+              AND table_name = ?
+              AND status = 'ACTIVE'
+        """,
+        ctx.schema(),
+        table
+        );
+
+        // Activate new schema
+        jdbc.update("""
+            UPDATE platform_schema_registry
+            SET status = 'ACTIVE',
+                approved_by = ?,
+                approved_at = now()
+            WHERE tenant = ?
+              AND table_name = ?
+              AND version = ?
+        """,
+        ctx.user(),
+        ctx.schema(),
+        table,
+        version
+        );
+
+        // Deactivate old view tags
+        jdbc.update("""
+            UPDATE platform_view_registry
+            SET active = false
+            WHERE tenant = ?
+              AND table_name = ?
+              AND version < ?
+        """,
+        ctx.schema(),
+        table,
+        version
+        );
+    }
+
+    /* =========================================================
+       LOAD ACTIVE SCHEMA
+     ========================================================= */
+
+    public JsonNode activeSchema(
+            JdbcTemplate jdbc,
+            TenantContext ctx,
+            String table
+    ) {
+        String json = jdbc.queryForObject("""
+            SELECT schema_json
+            FROM platform_schema_registry
+            WHERE tenant = ?
+              AND table_name = ?
+              AND status = 'ACTIVE'
+        """,
+        String.class,
+        ctx.schema(),
+        table
+        );
+
+        return JsonUtil.parse(json);
+    }
+
+    /* =========================================================
+       LOAD ACTIVE VALIDATIONS (FROM VIEW TAGS)
+     ========================================================= */
+
+    public Map<String, JsonNode> activeValidations(
+            JdbcTemplate jdbc,
+            TenantContext ctx,
+            String table
+    ) {
+        Map<String, JsonNode> rules = new HashMap<>();
+
+        jdbc.query("""
+            SELECT column_name, view_json
+            FROM platform_view_registry
+            WHERE tenant = ?
+              AND table_name = ?
+              AND active = true
+        """,
+        rs -> {
+            JsonNode view = JsonUtil.parse(rs.getString("view_json"));
+            JsonNode validations = view.path("validations");
+            if (!validations.isMissingNode()) {
+                rules.put(rs.getString("column_name"), validations);
+            }
+        },
+        ctx.schema(),
+        table
+        );
+
+        return rules;
+    }
+
+    /* =========================================================
+       LOAD ACTIVE VIEW TAGS (UI)
+     ========================================================= */
+
+    public Map<String, JsonNode> activeViewTags(
+            JdbcTemplate jdbc,
+            TenantContext ctx,
+            String table
+    ) {
+        Map<String, JsonNode> result = new HashMap<>();
+
+        jdbc.query("""
+            SELECT column_name, view_json
+            FROM platform_view_registry
+            WHERE tenant = ?
+              AND table_name = ?
+              AND active = true
+        """,
+        rs -> result.put(
+                rs.getString("column_name"),
+                JsonUtil.parse(rs.getString("view_json"))
+        ),
+        ctx.schema(),
+        table
+        );
+
+        return result;
+    }
+}
