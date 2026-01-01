@@ -1,0 +1,275 @@
+package com.mmsapre.platform.sql;
+
+import com.fasterxml.jackson.databind.JsonNode;
+
+import java.sql.Timestamp;
+import java.time.Instant;
+import java.util.*;
+
+/**
+ * Schema-driven DML generator (PreparedStatement safe)
+ */
+public final class DmlGenerator {
+
+    private DmlGenerator() {}
+
+    /* =========================================================
+       INSERT (SCD2 + DEDUP)
+     ========================================================= */
+
+    public static SqlAndParams insert(
+            String physicalTable,
+            JsonNode record,
+            String hash,
+            JsonNode schema
+    ) {
+        Map<String, Object> params = new LinkedHashMap<>();
+
+        JsonNode columns = schema.path("columns");
+
+        columns.fields().forEachRemaining(e -> {
+            String col = e.getKey();
+            JsonNode def = e.getValue();
+
+            if (record.has(col)) {
+                params.put(
+                        col,
+                        SqlTypeMapper.toJdbcValue(
+                                record.get(col),
+                                def.path("type").asText()
+                        )
+                );
+            } else if (!def.path("nullable").asBoolean(true)) {
+                throw new IllegalArgumentException(
+                        "Missing required field: " + col
+                );
+            }
+        });
+
+        params.put("hash", hash);
+        params.put("is_active", true);
+        params.put("valid_from", Timestamp.from(Instant.now()));
+        params.put("valid_to",
+                Timestamp.valueOf("9999-12-31 00:00:00"));
+
+        String cols = String.join(", ", params.keySet());
+        String vals = params.keySet().stream()
+                .map(k -> ":" + k)
+                .toList()
+                .toString()
+                .replace("[", "")
+                .replace("]", "");
+
+        String sql = """
+            INSERT INTO %s (%s)
+            VALUES (%s)
+            ON CONFLICT (hash) DO NOTHING
+        """.formatted(physicalTable, cols, vals);
+
+        return new SqlAndParams(sql, params);
+    }
+
+    /* =========================================================
+       EXPIRE ACTIVE (SCD-2)
+     ========================================================= */
+
+    public static SqlAndParams expireActive(
+            String physicalTable,
+            String hash,
+            String activeFlag,
+            String endCol
+    ) {
+        String sql = """
+            UPDATE %s
+            SET %s=false,
+                %s=now()
+            WHERE hash=:hash
+              AND %s=true
+        """.formatted(
+                physicalTable,
+                activeFlag,
+                endCol,
+                activeFlag
+        );
+
+        return new SqlAndParams(sql, Map.of("hash", hash));
+    }
+
+    /* =========================================================
+       SOFT DELETE
+     ========================================================= */
+
+    public static SqlAndParams softDelete(
+            String physicalTable,
+            String hash,
+            String activeFlag,
+            String endCol
+    ) {
+        return expireActive(physicalTable, hash, activeFlag, endCol);
+    }
+
+    /* =========================================================
+       SEARCH (FILTER + ASOF)
+     ========================================================= */
+
+    public static SqlAndParams select(
+            String physicalTable,
+            JsonNode where,
+            JsonNode schema,
+            boolean scd2,
+            String activeFlag,
+            String startCol,
+            String endCol,
+            String asOf,
+            int limit,
+            int offset
+    ) {
+        StringBuilder sql = new StringBuilder();
+        Map<String, Object> params = new HashMap<>();
+
+        sql.append("SELECT * FROM ").append(physicalTable);
+
+        boolean first = true;
+        if (scd2 || (where != null && where.isObject()) || asOf != null) {
+            sql.append(" WHERE ");
+        }
+
+        if (scd2) {
+            sql.append(activeFlag).append("=true");
+            first = false;
+        }
+
+        if (asOf != null) {
+            if (!first) sql.append(" AND ");
+            sql.append(":asOf BETWEEN ")
+               .append(startCol)
+               .append(" AND ")
+               .append(endCol);
+            params.put("asOf", Timestamp.from(Instant.parse(asOf)));
+            first = false;
+        }
+
+        if (where != null && where.isObject()) {
+            JsonNode cols = schema.path("columns");
+
+            where.fields().forEachRemaining(e -> {
+                if (!first) sql.append(" AND ");
+                String col = e.getKey();
+                String type = cols.get(col).path("type").asText();
+
+                if ("jsonb".equalsIgnoreCase(type)) {
+                    sql.append(col).append(" @> :").append(col);
+                    params.put(col, e.getValue().toString());
+                } else {
+                    sql.append(col).append("=:").append(col);
+                    params.put(
+                            col,
+                            SqlTypeMapper.toJdbcValue(
+                                    e.getValue(),
+                                    type
+                            )
+                    );
+                }
+                first = false;
+            });
+        }
+
+        sql.append(" LIMIT ").append(limit);
+        sql.append(" OFFSET ").append(offset);
+
+        return new SqlAndParams(sql.toString(), params);
+    }
+
+public static SqlAndParams select(
+        String physicalTable,
+        String tenant,
+        JsonNode where,
+        JsonNode schema,
+        boolean scd2,
+        String activeFlag,
+        String startCol,
+        String endCol,
+        String asOf,
+        int limit,
+        int offset
+) {
+    StringBuilder sql = new StringBuilder();
+    Map<String, Object> params = new LinkedHashMap<>();
+
+    sql.append("SELECT * FROM ").append(physicalTable);
+    sql.append(" WHERE tenant = :tenant");
+
+    params.put("tenant", tenant);
+
+    // -------------------------------------------------
+    // SCD-2 active enforcement
+    // -------------------------------------------------
+    if (scd2) {
+        sql.append(" AND ").append(activeFlag).append(" = true");
+    }
+
+    // -------------------------------------------------
+    // AS-OF support
+    // -------------------------------------------------
+    if (asOf != null) {
+        sql.append(" AND :asOf BETWEEN ")
+           .append(startCol)
+           .append(" AND ")
+           .append(endCol);
+
+        params.put(
+            "asOf",
+            Timestamp.from(Instant.parse(asOf))
+        );
+    }
+
+    // -------------------------------------------------
+    // Schema-driven WHERE
+    // -------------------------------------------------
+    if (where != null && where.isObject()) {
+
+        JsonNode columns = schema.path("columns");
+
+        where.fields().forEachRemaining(e -> {
+            String col = e.getKey();
+
+            if (!columns.has(col)) {
+                throw new IllegalArgumentException(
+                        "Unknown column in query: " + col
+                );
+            }
+
+            String type =
+                    columns.get(col).path("type").asText();
+
+            if ("jsonb".equalsIgnoreCase(type)) {
+                sql.append(" AND ")
+                   .append(col)
+                   .append(" @> :")
+                   .append(col);
+
+                params.put(col, e.getValue().toString());
+            } else {
+                sql.append(" AND ")
+                   .append(col)
+                   .append(" = :")
+                   .append(col);
+
+                params.put(
+                    col,
+                    SqlTypeMapper.toJdbcValue(
+                            e.getValue(),
+                            type
+                    )
+                );
+            }
+        });
+    }
+
+    sql.append(" LIMIT ").append(limit);
+    sql.append(" OFFSET ").append(offset);
+
+    return new SqlAndParams(sql.toString(), params);
+}
+
+}
