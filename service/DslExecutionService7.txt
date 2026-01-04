@@ -259,6 +259,56 @@ public class DslExecutionService {
         }
     }
 
+private Object bulk(
+        JdbcTemplate jdbc,
+        TenantContext ctx,
+        String table,
+        String json
+) {
+    JsonNode payload = JsonUtil.parse(json);
+    JsonNode records = payload.path("records");
+
+    if (!records.isArray()) {
+        throw new IllegalArgumentException("Bulk payload must contain 'records' array");
+    }
+
+    int size = records.size();
+
+    Map<String, Object> active =
+            registryDao.active(jdbc, ctx, table);
+
+    JsonNode schemaJson =
+            JsonUtil.parse(active.get("schema_json").toString());
+
+    int version = (int) active.get("version");
+
+    String physical =
+            SqlNames.versioned(ctx.schema(), table, version);
+
+    // ---- SMALL BULK ONLY
+    if (size <= 1000) {
+        int inserted =
+                bulkService.bulkSmallJdbc(
+                        jdbc,
+                        ctx,
+                        physical,
+                        schemaJson,
+                        records
+                );
+
+        return Map.of(
+                "mode", "SMALL",
+                "inserted", inserted,
+                "tenant", ctx.schema(),
+                "table", table
+        );
+    }
+
+    throw new IllegalStateException(
+            "Payload > 1000 rows not allowed in SMALL bulk path"
+    );
+}
+
     /* =========================================================
        SEARCH (TENANT + ACTIVE ENFORCED)
      ========================================================= */
