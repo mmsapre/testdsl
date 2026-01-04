@@ -174,4 +174,88 @@ public class BulkService {
 
         return out.toString();
     }
+
+ public int bulkSmallJdbc(
+            JdbcTemplate jdbc,
+            TenantContext ctx,
+            String physicalTable,
+            JsonNode schema,
+            JsonNode records
+    ) {
+
+        JsonNode scd = schema.path("scd");
+        boolean scd2 = scd.path("type").asInt(0) == 2;
+
+        String activeFlag =
+                scd.path("active_flag").asText("is_active");
+        String endCol =
+                scd.path("end_date").asText("valid_to");
+
+        int[] counter = new int[1];
+
+        jdbc.execute((Connection con) -> {
+            con.setAutoCommit(false);
+
+            try {
+                for (JsonNode record : records) {
+
+                    // ---- compute hash
+                    String hash =
+                            hashService.computeHash(
+                                    record,
+                                    schema.path("hash_keys"),
+                                    schema.path("columns")
+                            );
+
+                    // ---- expire active (SCD-2)
+                    if (scd2) {
+                        SqlAndParams expire =
+                                DmlGenerator.expireActive(
+                                        physicalTable,
+                                        hash,
+                                        activeFlag,
+                                        endCol
+                                );
+
+                        try (PreparedStatement ps =
+                                     NamedPreparedStatement.prepare(
+                                             con,
+                                             expire.sql(),
+                                             expire.params()
+                                     )) {
+                            ps.executeUpdate();
+                        }
+                    }
+
+                    // ---- insert
+                    SqlAndParams insert =
+                            DmlGenerator.insert(
+                                    physicalTable,
+                                    record,
+                                    hash,
+                                    schema
+                            );
+
+                    try (PreparedStatement ps =
+                                 NamedPreparedStatement.prepare(
+                                         con,
+                                         insert.sql(),
+                                         insert.params()
+                                 )) {
+                        ps.executeUpdate();
+                        counter[0]++;
+                    }
+                }
+
+                con.commit();
+                return null;
+
+            } catch (Exception e) {
+                con.rollback();
+                throw e;
+            }
+        });
+
+        return counter[0];
+    }
 }
