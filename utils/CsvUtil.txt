@@ -1,0 +1,69 @@
+package com.mmsapre.platform.util;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.*;
+
+import java.io.*;
+import java.nio.charset.StandardCharsets;
+import java.util.*;
+
+public final class CsvUtil {
+
+    private static final ObjectMapper OM = JsonUtil.om();
+
+    private CsvUtil() {}
+
+    /**
+     * Converts CSV bytes → JsonNode:
+     * {
+     *   "records": [ {col: value}, ... ]
+     * }
+     */
+    public static JsonNode parse(byte[] csvBytes) {
+
+        ArrayNode records = OM.createArrayNode();
+
+        try (BufferedReader reader =
+                     new BufferedReader(
+                         new InputStreamReader(
+                             new ByteArrayInputStream(csvBytes),
+                             StandardCharsets.UTF_8))) {
+
+            String headerLine = reader.readLine();
+            if (headerLine == null) {
+                throw new IllegalArgumentException("CSV is empty");
+            }
+
+            String[] headers = headerLine.split(",");
+
+            String line;
+            while ((line = reader.readLine()) != null) {
+
+                if (line.isBlank()) continue;
+
+                String[] values = line.split(",", -1);
+                ObjectNode record = OM.createObjectNode();
+
+                for (int i = 0; i < headers.length; i++) {
+                    String key = headers[i].trim();
+                    String val = values.length > i ? values[i].trim() : null;
+
+                    if (val == null || val.isEmpty()) {
+                        record.putNull(key);
+                    } else {
+                        record.put(key, val);
+                    }
+                }
+                records.add(record);
+            }
+
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to parse CSV", e);
+        }
+
+        ObjectNode root = OM.createObjectNode();
+        root.set("records", records);
+        return root;
+    }
+}
