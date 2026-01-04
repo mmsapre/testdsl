@@ -1,0 +1,95 @@
+package com.mmsapre.platform.service;
+
+import com.fasterxml.jackson.databind.JsonNode;
+
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.HexFormat;
+
+/**
+ * Computes deterministic hash based on configured key fields.
+ *
+ * Used for:
+ *  - deduplication
+ *  - idempotency
+ *  - SCD-2 lifecycle
+ */
+public class HashService {
+
+    /**
+     * Computes SHA-256 hash using only configured key names.
+     *
+     * @param record     input record (JSON / CSV converted)
+     * @param hashKeys   array of field names (schema_json.hash_keys)
+     * @param columns    schema_json.columns (for type awareness if needed)
+     */
+    public String computeHash(
+            JsonNode record,
+            JsonNode hashKeys,
+            JsonNode columns
+    ) {
+        if (hashKeys == null || !hashKeys.isArray()) {
+            throw new IllegalArgumentException("hash_keys must be an array");
+        }
+
+        StringBuilder canonical = new StringBuilder();
+
+        for (JsonNode key : hashKeys) {
+            String field = key.asText();
+
+            JsonNode valueNode =
+                    record.has(field)
+                            ? record.get(field)
+                            : null;
+
+            canonical.append(field)
+                     .append('=')
+                     .append(normalize(valueNode))
+                     .append('|');
+        }
+
+        return sha256(canonical.toString());
+    }
+
+    /**
+     * Normalizes value so that:
+     *  - nulls are stable
+     *  - numbers are canonical
+     *  - strings are trimmed
+     */
+    private String normalize(JsonNode node) {
+        if (node == null || node.isNull() || node.isMissingNode()) {
+            return "∅"; // stable null marker
+        }
+
+        if (node.isTextual()) {
+            return node.asText().trim();
+        }
+
+        if (node.isNumber()) {
+            return node.decimalValue().stripTrailingZeros().toPlainString();
+        }
+
+        if (node.isBoolean()) {
+            return Boolean.toString(node.booleanValue());
+        }
+
+        // Fallback for objects / arrays (should not be used for hash keys)
+        return node.toString();
+    }
+
+    /**
+     * SHA-256 hex digest
+     */
+    private String sha256(String input) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] digest =
+                    md.digest(input.getBytes(StandardCharsets.UTF_8));
+
+            return HexFormat.of().formatHex(digest);
+        } catch (Exception e) {
+            throw new RuntimeException("Hash computation failed", e);
+        }
+    }
+}
