@@ -1,0 +1,180 @@
+package com.mmsapre.platform.tenant;
+
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Repository;
+
+import java.util.Map;
+
+@Repository
+public class TenantRegistryDao {
+
+    public void ensure(JdbcTemplate jdbc) {
+        jdbc.execute("""
+            CREATE TABLE IF NOT EXISTS platform_tenant (
+              tenant_id   VARCHAR(64) PRIMARY KEY,
+              status      VARCHAR(16) NOT NULL DEFAULT 'ACTIVE',
+              created_by  VARCHAR(64) NOT NULL,
+              created_at  TIMESTAMP NOT NULL DEFAULT now(),
+              updated_by  VARCHAR(64),
+              updated_at  TIMESTAMP
+            )
+        """);
+
+        jdbc.execute("""
+            CREATE TABLE IF NOT EXISTS platform_tenant_alias (
+              tenant_id    VARCHAR(64) NOT NULL REFERENCES platform_tenant(tenant_id),
+              alias        VARCHAR(64) NOT NULL,
+              schema_name  VARCHAR(64) NOT NULL,
+              is_default   BOOLEAN NOT NULL DEFAULT false,
+              status       VARCHAR(16) NOT NULL DEFAULT 'ACTIVE',
+              created_by   VARCHAR(64) NOT NULL,
+              created_at   TIMESTAMP NOT NULL DEFAULT now(),
+              updated_by   VARCHAR(64),
+              updated_at   TIMESTAMP,
+              PRIMARY KEY (tenant_id, alias)
+            )
+        """);
+
+        jdbc.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_tenant_default_alias
+            ON platform_tenant_alias(tenant_id)
+            WHERE is_default = true
+        """);
+
+        jdbc.execute("""
+            CREATE TABLE IF NOT EXISTS platform_tenant_quota (
+              tenant_id       VARCHAR(64) NOT NULL,
+              alias           VARCHAR(64) NOT NULL,
+              max_rps         INT NOT NULL DEFAULT 50,
+              max_bulk_rows   INT NOT NULL DEFAULT 1000,
+              PRIMARY KEY (tenant_id, alias)
+            )
+        """);
+    }
+
+    public void onboardTenant(JdbcTemplate jdbc, String tenantId, String createdBy) {
+        jdbc.update("""
+            INSERT INTO platform_tenant (tenant_id, status, created_by)
+            VALUES (?, 'ACTIVE', ?)
+            ON CONFLICT (tenant_id) DO NOTHING
+        """, tenantId, createdBy);
+    }
+
+    public void upsertAlias(
+            JdbcTemplate jdbc,
+            String tenantId,
+            String alias,
+            String schema,
+            boolean isDefault,
+            String user
+    ) {
+        // If making default, clear existing default first (safe in tx)
+        if (isDefault) {
+            jdbc.update("""
+                UPDATE platform_tenant_alias
+                   SET is_default=false,
+                       updated_by=?,
+                       updated_at=now()
+                 WHERE tenant_id=?
+                   AND is_default=true
+            """, user, tenantId);
+        }
+
+        jdbc.update("""
+            INSERT INTO platform_tenant_alias
+              (tenant_id, alias, schema_name, is_default, status, created_by)
+            VALUES (?, ?, ?, ?, 'ACTIVE', ?)
+            ON CONFLICT (tenant_id, alias)
+            DO UPDATE SET
+              schema_name=EXCLUDED.schema_name,
+              is_default=EXCLUDED.is_default,
+              status='ACTIVE',
+              updated_by=EXCLUDED.created_by,
+              updated_at=now()
+        """, tenantId, alias, schema, isDefault, user);
+    }
+
+    public void upsertQuota(
+            JdbcTemplate jdbc,
+            String tenantId,
+            String alias,
+            int maxRps,
+            int maxBulkRows
+    ) {
+        jdbc.update("""
+            INSERT INTO platform_tenant_quota
+              (tenant_id, alias, max_rps, max_bulk_rows)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT (tenant_id, alias)
+            DO UPDATE SET
+              max_rps=EXCLUDED.max_rps,
+              max_bulk_rows=EXCLUDED.max_bulk_rows
+        """, tenantId, alias, maxRps, maxBulkRows);
+    }
+
+    public TenantContext resolve(JdbcTemplate jdbc, String tenantId, String user) {
+        // default alias+schema for tenant
+        return jdbc.queryForObject("""
+            SELECT t.tenant_id, a.alias, a.schema_name
+              FROM platform_tenant t
+              JOIN platform_tenant_alias a ON a.tenant_id=t.tenant_id
+             WHERE t.tenant_id=?
+               AND t.status='ACTIVE'
+               AND a.status='ACTIVE'
+               AND a.is_default=true
+        """, (rs, i) -> new TenantContext(
+                rs.getString("tenant_id"),
+                rs.getString("alias"),
+                rs.getString("schema_name"),
+                user
+        ), tenantId);
+    }
+
+    public TenantContext resolve(JdbcTemplate jdbc, String tenantId, String alias, String user) {
+        // resolve specific alias mapping for tenant
+        return jdbc.queryForObject("""
+            SELECT t.tenant_id, a.alias, a.schema_name
+              FROM platform_tenant t
+              JOIN platform_tenant_alias a ON a.tenant_id=t.tenant_id
+             WHERE t.tenant_id=?
+               AND t.status='ACTIVE'
+               AND a.status='ACTIVE'
+               AND a.alias=?
+        """, (rs, i) -> new TenantContext(
+                rs.getString("tenant_id"),
+                rs.getString("alias"),
+                rs.getString("schema_name"),
+                user
+        ), tenantId, alias);
+    }
+
+    public Map<String, Object> quota(JdbcTemplate jdbc, String tenantId, String alias) {
+        return jdbc.queryForMap("""
+            SELECT max_rps, max_bulk_rows
+              FROM platform_tenant_quota
+             WHERE tenant_id=?
+               AND alias=?
+        """, tenantId, alias);
+    }
+
+    public void setTenantStatus(JdbcTemplate jdbc, String tenantId, String status, String user) {
+        jdbc.update("""
+            UPDATE platform_tenant
+               SET status=?,
+                   updated_by=?,
+                   updated_at=now()
+             WHERE tenant_id=?
+        """, status, user, tenantId);
+    }
+
+    public void setAliasStatus(JdbcTemplate jdbc, String tenantId, String alias, String status, String user) {
+        jdbc.update("""
+            UPDATE platform_tenant_alias
+               SET status=?,
+                   updated_by=?,
+                   updated_at=now()
+             WHERE tenant_id=?
+               AND alias=?
+        """, status, user, tenantId, alias);
+    }
+}
