@@ -1,0 +1,46 @@
+package com.mmsapre.platform.tenant;
+
+import com.mmsapre.platform.security.JwtPrincipalExtractor;
+import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Component;
+
+@Component
+public class TenantResolver {
+
+    private final TenantRegistryDao dao;
+    private final JdbcResolver jdbcResolver;
+    private final JwtPrincipalExtractor principal;
+
+    public TenantResolver(
+            TenantRegistryDao dao,
+            JdbcResolver jdbcResolver,
+            JwtPrincipalExtractor principal
+    ) {
+        this.dao = dao;
+        this.jdbcResolver = jdbcResolver;
+        this.principal = principal;
+    }
+
+    /** Resolve tenant default alias+schema */
+    public TenantContext resolve(HttpServletRequest request) {
+        String tenantId = principal.tenantId(request);
+        String user = principal.user(request);
+
+        JdbcTemplate control = jdbcResolver.jdbc("pg_main"); // control-plane DB
+        dao.ensure(control);
+
+        return dao.resolve(control, tenantId, user);
+    }
+
+    /** Resolve tenant for requested alias, validates mapping */
+    public TenantContext resolve(HttpServletRequest request, String alias) {
+        String tenantId = principal.tenantId(request);
+        String user = principal.user(request);
+
+        JdbcTemplate control = jdbcResolver.jdbc("pg_main");
+        dao.ensure(control);
+
+        return dao.resolve(control, tenantId, alias, user);
+    }
+}
