@@ -1,0 +1,54 @@
+package com.mmsapre.platform.security;
+
+import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.stereotype.Component;
+
+@Component
+public class JwtPrincipalExtractor {
+
+    public String tenantId(HttpServletRequest req) {
+        // 1) header override (optional)
+        String h = req.getHeader("X-Tenant-Id");
+        if (h != null && !h.isBlank()) return h;
+
+        // 2) JWT claim
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth != null && auth.getPrincipal() instanceof Jwt jwt) {
+            String tenant = jwt.getClaimAsString("tenant");
+            if (tenant == null || tenant.isBlank()) {
+                tenant = jwt.getClaimAsString("tid");
+            }
+            if (tenant != null && !tenant.isBlank()) return tenant;
+        }
+
+        throw new IllegalArgumentException("Tenant not provided (header or JWT claim)");
+    }
+
+    public String user(HttpServletRequest req) {
+        // 1) header override (optional)
+        String h = req.getHeader("X-User-Id");
+        if (h != null && !h.isBlank()) return h;
+
+        // 2) JWT claim
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth != null && auth.getPrincipal() instanceof Jwt jwt) {
+            String u = jwt.getClaimAsString("preferred_username");
+            if (u == null || u.isBlank()) u = jwt.getSubject();
+            if (u != null && !u.isBlank()) return u;
+        }
+
+        return "system";
+    }
+
+    public boolean isAdmin() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null) return false;
+        return auth.getAuthorities().stream().anyMatch(a ->
+                a.getAuthority().equals("ROLE_ADMIN") ||
+                a.getAuthority().equals("SCOPE_admin")
+        );
+    }
+}
