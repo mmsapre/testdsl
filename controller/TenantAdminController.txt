@@ -1,0 +1,101 @@
+package com.mmsapre.platform.api.admin;
+
+import com.mmsapre.platform.security.JwtPrincipalExtractor;
+import com.mmsapre.platform.tenant.JdbcResolver;
+import com.mmsapre.platform.tenant.TenantRegistryDao;
+import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
+import java.util.Map;
+
+@RestController
+@RequestMapping("/admin/tenants")
+public class TenantAdminController {
+
+    private final JdbcResolver jdbcResolver;
+    private final TenantRegistryDao dao;
+    private final JwtPrincipalExtractor principal;
+
+    public TenantAdminController(
+            JdbcResolver jdbcResolver,
+            TenantRegistryDao dao,
+            JwtPrincipalExtractor principal
+    ) {
+        this.jdbcResolver = jdbcResolver;
+        this.dao = dao;
+        this.principal = principal;
+    }
+
+    @PostMapping("/onboard")
+    public Map<String, Object> onboard(
+            @RequestBody Map<String, Object> req,
+            HttpServletRequest request
+    ) {
+        if (!principal.isAdmin()) {
+            throw new SecurityException("Admin only");
+        }
+
+        String user = principal.user(request);
+        String tenant = (String) req.get("tenant");
+
+        JdbcTemplate control = jdbcResolver.jdbc("pg_main");
+        dao.ensure(control);
+
+        dao.onboardTenant(control, tenant, user);
+
+        List<Map<String, Object>> aliases =
+                (List<Map<String, Object>>) req.get("aliases");
+
+        if (aliases != null) {
+            for (Map<String, Object> a : aliases) {
+                String alias = (String) a.get("alias");
+                String schema = (String) a.get("schema");
+                boolean def = Boolean.TRUE.equals(a.get("default"));
+
+                dao.upsertAlias(control, tenant, alias, schema, def, user);
+            }
+        }
+
+        Map<String, Object> quota = (Map<String, Object>) req.get("quota");
+        if (quota != null) {
+            String alias = (String) quota.get("alias");
+            int maxRps = ((Number) quota.getOrDefault("maxRps", 50)).intValue();
+            int maxBulkRows = ((Number) quota.getOrDefault("maxBulkRows", 1000)).intValue();
+
+            dao.upsertQuota(control, tenant, alias, maxRps, maxBulkRows);
+        }
+
+        return Map.of("status", "ONBOARDED", "tenant", tenant);
+    }
+
+    @PostMapping("/{tenant}/status/{status}")
+    public Map<String, Object> tenantStatus(
+            @PathVariable String tenant,
+            @PathVariable String status,
+            HttpServletRequest request
+    ) {
+        if (!principal.isAdmin()) throw new SecurityException("Admin only");
+        JdbcTemplate control = jdbcResolver.jdbc("pg_main");
+        dao.ensure(control);
+
+        dao.setTenantStatus(control, tenant, status.toUpperCase(), principal.user(request));
+        return Map.of("tenant", tenant, "status", status.toUpperCase());
+    }
+
+    @PostMapping("/{tenant}/alias/{alias}/status/{status}")
+    public Map<String, Object> aliasStatus(
+            @PathVariable String tenant,
+            @PathVariable String alias,
+            @PathVariable String status,
+            HttpServletRequest request
+    ) {
+        if (!principal.isAdmin()) throw new SecurityException("Admin only");
+        JdbcTemplate control = jdbcResolver.jdbc("pg_main");
+        dao.ensure(control);
+
+        dao.setAliasStatus(control, tenant, alias, status.toUpperCase(), principal.user(request));
+        return Map.of("tenant", tenant, "alias", alias, "status", status.toUpperCase());
+    }
+}
