@@ -1,0 +1,7 @@
+package com.mas.sap.prak.security;
+
+public record RequestContext(
+        String tenantId,
+        String consumerId,
+        String userId
+) {}
