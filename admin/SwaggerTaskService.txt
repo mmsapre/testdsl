@@ -1,0 +1,100 @@
+package com.mas.sap.prak.swagger;
+
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.scheduling.annotation.Async;
+import org.springframework.stereotype.Service;
+
+import java.time.LocalDateTime;
+import java.util.UUID;
+
+@Service
+public class SwaggerTaskService {
+
+    private final JdbcTemplate jdbcTemplate;
+
+    private final DynamicSwaggerService swaggerService;
+
+    public SwaggerTaskService(
+            JdbcTemplate jdbcTemplate,
+            DynamicSwaggerService swaggerService
+    ) {
+
+        this.jdbcTemplate = jdbcTemplate;
+        this.swaggerService = swaggerService;
+    }
+
+    public void submit(
+            UUID apiId
+    ) {
+
+        UUID taskId =
+                UUID.randomUUID();
+
+        jdbcTemplate.update(
+                """
+                insert into swagger_generation_task
+                (
+                    task_id,
+                    api_id,
+                    task_status
+                )
+                values (?, ?, 'PENDING')
+                """,
+                taskId,
+                apiId
+        );
+
+        generateAsync(
+                taskId,
+                apiId
+        );
+    }
+
+    @Async
+    public void generateAsync(
+            UUID taskId,
+            UUID apiId
+    ) {
+
+        try {
+
+            jdbcTemplate.update(
+                    """
+                    update swagger_generation_task
+                    set task_status = 'RUNNING',
+                        started_at = now()
+                    where task_id = ?
+                    """,
+                    taskId
+            );
+
+            swaggerService.generateAndStore(
+                    apiId
+            );
+
+            jdbcTemplate.update(
+                    """
+                    update swagger_generation_task
+                    set task_status = 'COMPLETED',
+                        completed_at = now()
+                    where task_id = ?
+                    """,
+                    taskId
+            );
+
+        } catch (Exception ex) {
+
+            jdbcTemplate.update(
+                    """
+                    update swagger_generation_task
+                    set task_status = 'FAILED',
+                        completed_at = now(),
+                        error_message = ?
+                    where task_id = ?
+                    """,
+                    ex.getMessage(),
+                    taskId
+            );
+        }
+    }
+}
