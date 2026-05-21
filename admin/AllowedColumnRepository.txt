@@ -1,0 +1,98 @@
+package com.mas.sap.prak.admin.repository;
+
+import javax.sql.DataSource;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.util.List;
+import java.util.UUID;
+
+public class AllowedColumnRepository {
+
+    private final DataSource dataSource;
+
+    public AllowedColumnRepository(
+            DataSource dataSource
+    ) {
+
+        this.dataSource = dataSource;
+    }
+
+    public void batchInsert(
+            UUID tableId,
+            List<ColumnRequest> columns
+    ) throws Exception {
+
+        String sql =
+                """
+                insert into api_allowed_column
+                (
+                    column_id,
+                    table_id,
+                    column_name,
+                    column_alias,
+                    data_type,
+                    selectable,
+                    filterable,
+                    sortable
+                )
+                values
+                (?, ?, ?, ?, ?, ?, ?, ?)
+                """;
+
+        try (
+                Connection connection =
+                        dataSource.getConnection();
+
+                PreparedStatement ps =
+                        connection.prepareStatement(sql)
+        ) {
+
+            for (ColumnRequest column : columns) {
+
+                ps.setObject(
+                        1,
+                        UUID.randomUUID()
+                );
+
+                ps.setObject(
+                        2,
+                        tableId
+                );
+
+                ps.setString(
+                        3,
+                        column.columnName()
+                );
+
+                ps.setString(
+                        4,
+                        column.columnAlias()
+                );
+
+                ps.setString(
+                        5,
+                        column.dataType()
+                );
+
+                ps.setBoolean(
+                        6,
+                        column.selectable()
+                );
+
+                ps.setBoolean(
+                        7,
+                        column.filterable()
+                );
+
+                ps.setBoolean(
+                        8,
+                        column.sortable()
+                );
+
+                ps.addBatch();
+            }
+
+            ps.executeBatch();
+        }
+    }
+}
