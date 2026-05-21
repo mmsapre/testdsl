@@ -1,0 +1,42 @@
+package com.mas.sap.prak.datasource;
+
+import com.zaxxer.hikari.HikariConfig;
+import com.zaxxer.hikari.HikariDataSource;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Service;
+
+import javax.sql.DataSource;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+
+@Service
+public class DynamicDataSourceService {
+
+    private final JdbcTemplate jdbcTemplate;
+    private final Map<String, DataSource> cache = new ConcurrentHashMap<>();
+
+    public DynamicDataSourceService(JdbcTemplate jdbcTemplate) {
+        this.jdbcTemplate = jdbcTemplate;
+    }
+
+    public DataSource getDataSource(String datasourceKey) {
+        return cache.computeIfAbsent(datasourceKey, this::create);
+    }
+
+    private DataSource create(String key) {
+        Map<String, Object> row = jdbcTemplate.queryForMap("""
+            select jdbc_url, username, password, max_pool_size
+            from datasource_registry
+            where datasource_key = ?
+            """, key);
+
+        HikariConfig config = new HikariConfig();
+        config.setJdbcUrl((String) row.get("jdbc_url"));
+        config.setUsername((String) row.get("username"));
+        config.setPassword((String) row.get("password"));
+        config.setMaximumPoolSize((Integer) row.get("max_pool_size"));
+        config.setPoolName("dsl-api-" + key);
+
+        return new HikariDataSource(config);
+    }
+}
