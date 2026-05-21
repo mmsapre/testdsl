@@ -1,0 +1,41 @@
+package com.mas.sap.prak.admin;
+
+import com.mas.sap.prak.admin.dto.ApiRegistrationRequest;
+import com.mas.sap.prak.openapi.DynamicOpenApiGenerator;
+import com.mas.sap.prak.registry.ApiRegistryService;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.UUID;
+
+@RestController
+@RequestMapping("/admin/apis")
+public class ApiAdminController {
+
+    private final ApiRegistryService registryService;
+    private final DynamicOpenApiGenerator openApiGenerator;
+
+    public ApiAdminController(
+            ApiRegistryService registryService,
+            DynamicOpenApiGenerator openApiGenerator
+    ) {
+        this.registryService = registryService;
+        this.openApiGenerator = openApiGenerator;
+    }
+
+    @PostMapping
+    public UUID register(@RequestBody ApiRegistrationRequest request) throws Exception {
+        UUID apiId = registryService.register(request);
+        openApiGenerator.generateAndStore(apiId);
+        return apiId;
+    }
+
+    @GetMapping("/{apiId}/swagger")
+    public String viewSwagger(@PathVariable UUID apiId) {
+        return registryService.loadSwagger(apiId);
+    }
+
+    @GetMapping("/{apiId}/metadata")
+    public Object viewMetadata(@PathVariable UUID apiId) {
+        return registryService.loadApiMetadata(apiId);
+    }
+}
