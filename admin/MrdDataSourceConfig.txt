@@ -1,0 +1,62 @@
+package com.mas.sap.prak.config;
+
+import com.zaxxer.hikari.HikariConfig;
+import com.zaxxer.hikari.HikariDataSource;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.jdbc.core.JdbcTemplate;
+
+import javax.sql.DataSource;
+
+@Configuration
+@EnableConfigurationProperties(
+        MrdDataSourceProperties.class
+)
+public class MrdDataSourceConfig {
+
+    @Bean(name = "mrdDataSource")
+    public DataSource mrdDataSource(
+            MrdDataSourceProperties props
+    ) {
+
+        HikariConfig config =
+                new HikariConfig();
+
+        config.setJdbcUrl(
+                props.getJdbcUrl()
+        );
+
+        config.setUsername(
+                props.getUsername()
+        );
+
+        config.setPassword(
+                props.getPassword()
+        );
+
+        config.setDriverClassName(
+                props.getDriverClassName()
+        );
+
+        config.setMaximumPoolSize(
+                props.getMaximumPoolSize()
+        );
+
+        config.setPoolName(
+                "mrd-admin-pool"
+        );
+
+        return new HikariDataSource(config);
+    }
+
+    @Bean
+    public JdbcTemplate jdbcTemplate(
+            DataSource mrdDataSource
+    ) {
+
+        return new JdbcTemplate(
+                mrdDataSource
+        );
+    }
+}
