@@ -1,0 +1,12 @@
+@PostMapping
+public UUID register(
+        @RequestBody ApiRegistrationRequest request
+) {
+
+    UUID apiId =
+            registryService.register(request);
+
+    swaggerTaskService.submit(apiId);
+
+    return apiId;
+}
