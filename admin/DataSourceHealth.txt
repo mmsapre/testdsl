@@ -1,0 +1,14 @@
+package com.mas.sap.prak.datasource;
+
+public record DataSourceHealth(
+
+        String datasourceKey,
+
+        boolean active,
+
+        boolean healthy,
+
+        long lastCheckedAt,
+
+        String statusMessage
+) {}
