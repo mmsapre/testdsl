@@ -1,0 +1,16 @@
+create table swagger_generation_task (
+
+    task_id uuid primary key,
+
+    api_id uuid not null,
+
+    task_status varchar(30),
+
+    started_at timestamp,
+
+    completed_at timestamp,
+
+    error_message text,
+
+    created_at timestamp default now()
+);
