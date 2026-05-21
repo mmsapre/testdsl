@@ -1,0 +1,37 @@
+package com.mas.sap.prak.cache;
+
+import com.mas.sap.prak.datasource.DataSourceHealth;
+import org.apache.ignite.Ignite;
+import org.apache.ignite.IgniteCache;
+import org.springframework.stereotype.Service;
+
+@Service
+public class DataSourceHealthCache {
+
+    private final IgniteCache<String, DataSourceHealth> cache;
+
+    public DataSourceHealthCache(
+            Ignite ignite
+    ) {
+
+        this.cache =
+                ignite.getOrCreateCache(
+                        "datasource-health-cache"
+                );
+    }
+
+    public void put(
+            String key,
+            DataSourceHealth health
+    ) {
+
+        cache.put(key, health);
+    }
+
+    public DataSourceHealth get(
+            String key
+    ) {
+
+        return cache.get(key);
+    }
+}
