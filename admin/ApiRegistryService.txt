@@ -1,0 +1,159 @@
+package com.mas.sap.prak.registry;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.mas.sap.prak.admin.dto.*;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Service;
+
+import java.util.*;
+
+@Service
+public class ApiRegistryService {
+
+    private final JdbcTemplate jdbcTemplate;
+    private final ObjectMapper objectMapper = new ObjectMapper();
+
+    public ApiRegistryService(JdbcTemplate jdbcTemplate) {
+        this.jdbcTemplate = jdbcTemplate;
+    }
+
+    public UUID register(ApiRegistrationRequest request) {
+        UUID apiId = UUID.randomUUID();
+
+        jdbcTemplate.update("""
+            insert into api_registry
+            (api_id, domain, api_name, api_path, http_method, datasource_key, status)
+            values (?, ?, ?, ?, ?, ?, 'ACTIVE')
+            """,
+                apiId,
+                request.domain(),
+                request.apiName(),
+                request.apiPath(),
+                request.method(),
+                request.datasourceKey()
+        );
+
+        for (TableRequest table : request.tables()) {
+            UUID tableId = UUID.randomUUID();
+
+            jdbcTemplate.update("""
+                insert into api_allowed_table
+                (table_id, api_id, table_name, alias_name)
+                values (?, ?, ?, ?)
+                """,
+                    tableId,
+                    apiId,
+                    table.tableName(),
+                    table.aliasName()
+            );
+
+            for (ColumnRequest column : table.columns()) {
+                jdbcTemplate.update("""
+                    insert into api_allowed_column
+                    (column_id, table_id, column_name, column_alias, data_type,
+                     selectable, filterable, sortable)
+                    values (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                        UUID.randomUUID(),
+                        tableId,
+                        column.columnName(),
+                        column.columnAlias(),
+                        column.dataType(),
+                        column.selectable(),
+                        column.filterable(),
+                        column.sortable()
+                );
+            }
+        }
+
+        return apiId;
+    }
+
+    public ApiMetadata loadByPath(String path, String method) {
+        Map<String, Object> api = jdbcTemplate.queryForMap("""
+            select *
+            from api_registry
+            where api_path = ?
+              and lower(http_method) = lower(?)
+              and status = 'ACTIVE'
+            """, path, method);
+
+        UUID apiId = (UUID) api.get("api_id");
+
+        List<TableMetadata> tables = jdbcTemplate.query("""
+            select table_id, table_name, alias_name
+            from api_allowed_table
+            where api_id = ?
+            """,
+                (rs, rowNum) -> new TableMetadata(
+                        (UUID) rs.getObject("table_id"),
+                        rs.getString("table_name"),
+                        rs.getString("alias_name"),
+                        loadColumns((UUID) rs.getObject("table_id"))
+                ),
+                apiId
+        );
+
+        return new ApiMetadata(
+                apiId,
+                (String) api.get("domain"),
+                (String) api.get("api_name"),
+                (String) api.get("api_path"),
+                (String) api.get("http_method"),
+                (String) api.get("datasource_key"),
+                tables
+        );
+    }
+
+    private List<ColumnMetadata> loadColumns(UUID tableId) {
+        return jdbcTemplate.query("""
+            select column_name, column_alias, data_type,
+                   selectable, filterable, sortable
+            from api_allowed_column
+            where table_id = ?
+            """,
+                (rs, rowNum) -> new ColumnMetadata(
+                        rs.getString("column_name"),
+                        rs.getString("column_alias"),
+                        rs.getString("data_type"),
+                        rs.getBoolean("selectable"),
+                        rs.getBoolean("filterable"),
+                        rs.getBoolean("sortable")
+                ),
+                tableId
+        );
+    }
+
+    public ApiMetadata loadApiMetadata(UUID apiId) {
+        String path = jdbcTemplate.queryForObject(
+                "select api_path from api_registry where api_id = ?",
+                String.class,
+                apiId
+        );
+
+        String method = jdbcTemplate.queryForObject(
+                "select http_method from api_registry where api_id = ?",
+                String.class,
+                apiId
+        );
+
+        return loadByPath(path, method);
+    }
+
+    public void storeSwagger(UUID apiId, String swaggerJson) {
+        jdbcTemplate.update("""
+            update api_registry
+            set swagger_json = ?::jsonb,
+                updated_at = now()
+            where api_id = ?
+            """, swaggerJson, apiId);
+    }
+
+    public String loadSwagger(UUID apiId) {
+        return jdbcTemplate.queryForObject("""
+            select swagger_json::text
+            from api_registry
+            where api_id = ?
+            """, String.class, apiId);
+    }
+}
