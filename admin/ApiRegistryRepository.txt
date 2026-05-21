@@ -1,0 +1,65 @@
+package com.mas.sap.prak.admin.repository;
+
+import javax.sql.DataSource;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.util.UUID;
+
+public class ApiRegistryRepository {
+
+    private final DataSource dataSource;
+
+    public ApiRegistryRepository(
+            DataSource dataSource
+    ) {
+
+        this.dataSource = dataSource;
+    }
+
+    public void insertApi(
+            UUID apiId,
+            String domain,
+            String apiName,
+            String apiPath,
+            String method,
+            String datasourceKey
+    ) throws Exception {
+
+        String sql =
+                """
+                insert into api_registry
+                (
+                    api_id,
+                    domain,
+                    api_name,
+                    api_path,
+                    http_method,
+                    datasource_key,
+                    status,
+                    created_at,
+                    updated_at
+                )
+                values
+                (?, ?, ?, ?, ?, ?, ?, now(), now())
+                """;
+
+        try (
+                Connection connection =
+                        dataSource.getConnection();
+
+                PreparedStatement ps =
+                        connection.prepareStatement(sql)
+        ) {
+
+            ps.setObject(1, apiId);
+            ps.setString(2, domain);
+            ps.setString(3, apiName);
+            ps.setString(4, apiPath);
+            ps.setString(5, method);
+            ps.setString(6, datasourceKey);
+            ps.setString(7, "ACTIVE");
+
+            ps.executeUpdate();
+        }
+    }
+}
