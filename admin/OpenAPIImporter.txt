@@ -1,0 +1,561 @@
+package io.github.microcks.repository.importer.openapi;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import io.github.microcks.domain.*;
+import io.github.microcks.repository.ServiceRepository;
+import io.github.microcks.service.TestRunner;
+import io.swagger.v3.oas.models.OpenAPI;
+import io.swagger.v3.oas.models.PathItem;
+import io.swagger.v3.oas.models.Paths;
+import io.swagger.v3.oas.models.Operation;
+import io.swagger.v3.oas.models.responses.ApiResponse;
+import io.swagger.v3.oas.models.responses.ApiResponses;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
+
+import java.util.*;
+
+@Component
+public class OpenAPIImporter {
+
+    private static final Logger log = LoggerFactory.getLogger(OpenAPIImporter.class);
+    private final ServiceRepository serviceRepository;
+    private final ObjectMapper mapper;
+    private final TestRunner testRunner;
+
+    public OpenAPIImporter(ServiceRepository serviceRepository, TestRunner testRunner) {
+        this.serviceRepository = serviceRepository;
+        this.testRunner = testRunner;
+        this.mapper = new ObjectMapper();
+    }
+
+    public List<TestCase> extractTestCases(OpenAPI openAPI) {
+        List<TestCase> testCases = new ArrayList<>();
+        Paths paths = openAPI.getPaths();
+
+        if (paths != null) {
+            for (Map.Entry<String, PathItem> pathEntry : paths.entrySet()) {
+                String path = pathEntry.getKey();
+                PathItem pathItem = pathEntry.getValue();
+
+                pathItem.readOperationsMap().forEach((httpMethod, operation) -> {
+                    if (operation.getExtensions() != null && operation.getExtensions().containsKey("x-microcks-testcases")) {
+                        Object extensionObject = operation.getExtensions().get("x-microcks-testcases");
+                        try {
+                            ArrayNode testCaseArray = mapper.convertValue(extensionObject, ArrayNode.class);
+                            for (JsonNode testCaseNode : testCaseArray) {
+                                TestCase testCase = new TestCase();
+                                testCase.setName(testCaseNode.path("name").asText("Unnamed TestCase"));
+
+                                TestRequest request = new TestRequest();
+                                if (testCaseNode.has("input")) {
+                                    request.setPayload(mapper.writeValueAsString(testCaseNode.get("input")));
+                                }
+                                if (testCaseNode.has("params")) {
+                                    Map<String, String> queryParams = new HashMap<>();
+                                    testCaseNode.get("params").fields().forEachRemaining(entry ->
+                                        queryParams.put(entry.getKey(), entry.getValue().asText()));
+                                    request.setQueryParams(queryParams);
+                                }
+                                if (testCaseNode.has("headers")) {
+                                    Map<String, String> headers = new HashMap<>();
+                                    testCaseNode.get("headers").fields().forEachRemaining(entry ->
+                                        headers.put(entry.getKey(), entry.getValue().asText()));
+                                    request.setHeaders(headers);
+                                }
+                                testCase.setRequest(request);
+
+                                ExpectedResponse expected = new ExpectedResponse();
+                                JsonNode expectedNode = testCaseNode.path("expected");
+
+                                String expectedStatus = expectedNode.path("status").asText();
+                                if (expectedStatus.isEmpty()) {
+                                    ApiResponses responses = operation.getResponses();
+                                    if (responses != null && !responses.isEmpty()) {
+                                        expectedStatus = responses.keySet().iterator().next();
+                                        ApiResponse fallbackResponse = responses.get(expectedStatus);
+                                        if (fallbackResponse != null && fallbackResponse.getContent() != null) {
+                                            try {
+                                                String defaultBody = fallbackResponse.getContent().values().stream()
+                                                        .filter(Objects::nonNull)
+                                                        .map(mediaType -> {
+                                                            try {
+                                                                return mapper.writeValueAsString(mediaType.getExample());
+                                                            } catch (Exception e) {
+                                                                return null;
+                                                            }
+                                                        })
+                                                        .filter(Objects::nonNull)
+                                                        .findFirst()
+                                                        .orElse(null);
+                                                expected.setPayload(defaultBody);
+                                            } catch (Exception e) {
+                                                log.warn("Unable to serialize fallback example for response");
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    expected.setStatus(expectedStatus);
+                                }
+
+                                if (expectedNode.has("body")) {
+                                    expected.setPayload(mapper.writeValueAsString(expectedNode.get("body")));
+                                }
+                                if (expectedNode.has("headers")) {
+                                    Map<String, String> responseHeaders = new HashMap<>();
+                                    expectedNode.get("headers").fields().forEachRemaining(entry ->
+                                            responseHeaders.put(entry.getKey(), entry.getValue().asText()));
+                                    expected.setHeaders(responseHeaders);
+                                }
+                                testCase.setExpectedResponse(expected);
+
+                                testCase.setOperation(path + "#" + httpMethod.name().toLowerCase());
+
+                                // Incremental add/update support using repository lookup
+                                Optional<TestCase> existingTestCase = serviceRepository
+                                        .findTestCaseByOperationAndName(
+                                                testCase.getOperation(),
+                                                testCase.getName()
+                                        );
+
+                                if (existingTestCase.isPresent()) {
+                                    TestCase persisted = existingTestCase.get();
+
+                                    // Update request incrementally
+                                    persisted.setRequest(testCase.getRequest());
+
+                                    // Update expected response incrementally
+                                    persisted.setExpectedResponse(testCase.getExpectedResponse());
+
+                                    // Save updated version
+                                    serviceRepository.saveTestCase(persisted);
+
+                                    log.info("Updated existing testcase '{}' for operation {}",
+                                            persisted.getName(),
+                                            persisted.getOperation());
+
+                                    // Invoke updated testcase
+                                    testRunner.runTestCase(persisted);
+
+                                } else {
+
+                                    // New testcase
+                                    serviceRepository.saveTestCase(testCase);
+                                    testCases.add(testCase);
+
+                                    log.info("Added new testcase '{}' for operation {}",
+                                            testCase.getName(),
+                                            testCase.getOperation());
+
+                                    // Invoke newly added testcase
+                                    testRunner.runTestCase(testCase);
+                                }
+                            }
+                        } catch (Exception e) {
+                            log.warn("Error parsing x-microcks-testcases on {} {}: {}", httpMethod, path, e.getMessage());
+                        }
+                    }
+                });
+            }
+        }
+        return testCases;
+    }
+}
+
+// =====================================================
+// DYNAMIC JOIN SUPPORT (NO PREDEFINED JOINS)
+// =====================================================
+
+package com.mas.sap.prak.dsl;
+
+import java.util.List;
+import java.util.Map;
+
+public record DynamicJoin(
+        String leftTableAlias,
+        String leftColumn,
+        String rightTableAlias,
+        String rightColumn,
+        String joinType
+) {}
+
+// =====================================================
+// ELASTICSEARCH STYLE QUERY
+// =====================================================
+
+/*
+{
+  "select": [
+    "cal.calendar_id",
+    "hol.holiday_name"
+  ],
+
+  "from": [
+    {
+      "table": "t_master_calendar",
+      "alias": "cal"
+    },
+    {
+      "table": "t_holiday",
+      "alias": "hol"
+    }
+  ],
+
+  "joins": [
+    {
+      "left": "cal.calendar_id",
+      "right": "hol.calendar_id",
+      "type": "INNER"
+    }
+  ]
+}
+*/
+
+// =====================================================
+// SWAGGER DSL SAMPLE GENERATOR
+// =====================================================
+
+package com.mas.sap.prak.swagger;
+
+import com.mas.sap.prak.registry.*;
+import org.springframework.stereotype.Component;
+
+import java.util.*;
+
+@Component
+public class SwaggerDslExampleGenerator {
+
+    public Map<String, Object> generate(
+            ApiMetadata metadata
+    ) {
+
+        Map<String, Object> root =
+                new LinkedHashMap<>();
+
+        List<String> select =
+                new ArrayList<>();
+
+        List<Map<String, Object>> from =
+                new ArrayList<>();
+
+        List<Map<String, Object>> joins =
+                new ArrayList<>();
+
+        for (TableMetadata table : metadata.tables()) {
+
+            Map<String, Object> tableNode =
+                    new LinkedHashMap<>();
+
+            tableNode.put(
+                    "table",
+                    table.tableName()
+            );
+
+            tableNode.put(
+                    "alias",
+                    table.aliasName()
+            );
+
+            from.add(tableNode);
+
+            table.columns()
+                    .stream()
+                    .filter(ColumnMetadata::selectable)
+                    .limit(2)
+                    .forEach(c ->
+                            select.add(
+                                    table.aliasName()
+                                            + "."
+                                            + c.columnAlias()
+                            )
+                    );
+        }
+
+        if (metadata.tables().size() > 1) {
+
+            TableMetadata left =
+                    metadata.tables().get(0);
+
+            TableMetadata right =
+                    metadata.tables().get(1);
+
+            if (!left.columns().isEmpty()
+                    && !right.columns().isEmpty()) {
+
+                Map<String, Object> join =
+                        new LinkedHashMap<>();
+
+                join.put(
+                        "left",
+                        left.aliasName()
+                                + "."
+                                + left.columns().get(0).columnAlias()
+                );
+
+                join.put(
+                        "right",
+                        right.aliasName()
+                                + "."
+                                + right.columns().get(0).columnAlias()
+                );
+
+                join.put(
+                        "type",
+                        "INNER"
+                );
+
+                joins.add(join);
+            }
+        }
+
+        Map<String, Object> query =
+                new LinkedHashMap<>();
+
+        Map<String, Object> bool =
+                new LinkedHashMap<>();
+
+        List<Object> must =
+                new ArrayList<>();
+
+        if (!metadata.tables().isEmpty()) {
+
+            TableMetadata table =
+                    metadata.tables().get(0);
+
+            Optional<ColumnMetadata> stringColumn =
+                    table.columns()
+                            .stream()
+                            .filter(c ->
+                                    c.filterable()
+                                            && c.dataType()
+                                            .equalsIgnoreCase("string")
+                            )
+                            .findFirst();
+
+            stringColumn.ifPresent(column -> {
+
+                Map<String, Object> match =
+                        new LinkedHashMap<>();
+
+                match.put(
+                        table.aliasName()
+                                + "."
+                                + column.columnAlias(),
+                        "sample-value"
+                );
+
+                must.add(
+                        Map.of(
+                                "match",
+                                match
+                        )
+                );
+            });
+        }
+
+        bool.put("must", must);
+
+        query.put("bool", bool);
+
+        root.put("select", select);
+        root.put("from", from);
+
+        if (!joins.isEmpty()) {
+            root.put("joins", joins);
+        }
+
+        root.put("query", query);
+        root.put("limit", 100);
+        root.put("offset", 0);
+
+        return root;
+    }
+}
+
+// =====================================================
+// SWAGGER VIEW UI CONTROLLER
+// =====================================================
+
+package com.mas.sap.prak.swagger;
+
+import com.mas.sap.prak.cache.ApiMetadataCacheService;
+import com.mas.sap.prak.registry.ApiRegistryService;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.*;
+
+@RestController
+public class SwaggerExplorerController {
+
+    private final JdbcTemplate jdbcTemplate;
+
+    private final ApiRegistryService registryService;
+
+    private final ApiMetadataCacheService cacheService;
+
+    public SwaggerExplorerController(
+            JdbcTemplate jdbcTemplate,
+            ApiRegistryService registryService,
+            ApiMetadataCacheService cacheService
+    ) {
+        this.jdbcTemplate = jdbcTemplate;
+        this.registryService = registryService;
+        this.cacheService = cacheService;
+    }
+
+    @GetMapping("/swagger/apis")
+    public List<Map<String, Object>> listApis() {
+
+        return jdbcTemplate.queryForList(
+                """
+                select api_id,
+                       api_name,
+                       api_path,
+                       domain,
+                       status
+                from api_registry
+                order by api_name
+                """
+        );
+    }
+
+    @GetMapping("/swagger/apis/{apiId}")
+    public String showSwagger(
+            @PathVariable UUID apiId
+    ) {
+
+        String swagger =
+                cacheService.getSwagger(apiId);
+
+        if (swagger != null) {
+            return swagger;
+        }
+
+        swagger =
+                registryService.loadSwagger(apiId);
+
+        cacheService.putSwagger(
+                apiId,
+                swagger
+        );
+
+        return swagger;
+    }
+
+    @GetMapping("/swagger/apis/{apiId}/dsl-example")
+    public Object showDslExample(
+            @PathVariable UUID apiId
+    ) {
+
+        ApiMetadata metadata =
+                registryService.loadApiMetadata(apiId);
+
+        SwaggerDslExampleGenerator generator =
+                new SwaggerDslExampleGenerator();
+
+        return generator.generate(metadata);
+    }
+
+    @GetMapping(value = "/swagger/view", produces = "text/html")
+    public String swaggerView() {
+
+        return """
+            <html>
+            <head>
+                <title>Dynamic DSL Swagger Explorer</title>
+
+                <style>
+                    body {
+                        font-family: Arial;
+                        padding: 20px;
+                    }
+
+                    .api-card {
+                        border: 1px solid #ccc;
+                        border-radius: 5px;
+                        padding: 15px;
+                        margin-bottom: 15px;
+                    }
+
+                    button {
+                        background: #1976d2;
+                        color: white;
+                        border: none;
+                        padding: 10px;
+                        border-radius: 4px;
+                        cursor: pointer;
+                    }
+                </style>
+            </head>
+
+            <body>
+
+            <h1>Dynamic DSL APIs</h1>
+
+            <div id='apis'></div>
+
+            <script>
+
+            fetch('/swagger/apis')
+                .then(r => r.json())
+                .then(data => {
+
+                    let html = '';
+
+                    data.forEach(api => {
+
+                        html += `
+                            <div class='api-card'>
+                                <h2>${api.api_name}</h2>
+
+                                <p>
+                                    <b>Domain:</b> ${api.domain}
+                                </p>
+
+                                <p>
+                                    <b>Path:</b> ${api.api_path}
+                                </p>
+
+                                <button onclick="viewSwagger('${api.api_id}')">
+                                    View Swagger
+                                </button>
+                            </div>
+                        `;
+                    });
+
+                    document.getElementById('apis')
+                        .innerHTML = html;
+                });
+
+            function viewSwagger(apiId) {
+
+                window.open(
+                    '/swagger-ui/index.html?url=/swagger/apis/' + apiId,
+                    '_blank'
+                );
+            }
+
+            </script>
+
+            </body>
+            </html>
+            """;
+    }
+}
+, testCase.getName(), testCase.getOperation());
+                                }
+                            }
+                        } catch (Exception e) {
+                            log.warn("Error parsing x-microcks-testcases on {} {}: {}", httpMethod, path, e.getMessage());
+                        }
+                    }
+                });
+            }
+        }
+        return testCases;
+    }
+}
