@@ -1,0 +1,140 @@
+package com.mas.sap.prak.datasource;
+
+import com.mas.sap.prak.cache.ApiMetadataCacheService;
+import com.mas.sap.prak.cache.DataSourceHealthCache;
+import jakarta.annotation.PostConstruct;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Component;
+
+import javax.sql.DataSource;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+
+@Component
+public class DataSourceHealthChecker {
+
+    private final DynamicDataSourceService dataSourceService;
+
+    private final ApiMetadataCacheService cacheService;
+
+    private final DataSourceHealthCache healthCache;
+
+    public DataSourceHealthChecker(
+            DynamicDataSourceService dataSourceService,
+            ApiMetadataCacheService cacheService,
+            DataSourceHealthCache healthCache
+    ) {
+
+        this.dataSourceService = dataSourceService;
+        this.cacheService = cacheService;
+        this.healthCache = healthCache;
+    }
+
+    @PostConstruct
+    public void startupCheck() {
+
+        validateAll();
+    }
+
+    @Scheduled(
+            fixedDelay = 300000
+    )
+    public void validateAll() {
+
+        cacheService.getAllDatasourceKeys()
+                .forEach(this::validate);
+    }
+
+    public void validate(
+            String datasourceKey
+    ) {
+
+        DataSourceMetadata metadata =
+                cacheService.getDatasource(
+                        datasourceKey
+                );
+
+        if (metadata == null) {
+            return;
+        }
+
+        if (!metadata.datasourceEnabled()) {
+
+            healthCache.put(
+                    datasourceKey,
+                    new DataSourceHealth(
+                            datasourceKey,
+                            false,
+                            false,
+                            System.currentTimeMillis(),
+                            "Datasource disabled"
+                    )
+            );
+
+            return;
+        }
+
+        if (!metadata.validationEnabled()) {
+
+            healthCache.put(
+                    datasourceKey,
+                    new DataSourceHealth(
+                            datasourceKey,
+                            true,
+                            true,
+                            System.currentTimeMillis(),
+                            "Validation disabled"
+                    )
+            );
+
+            return;
+        }
+
+        try {
+
+            DataSource ds =
+                    dataSourceService.getDataSource(
+                            datasourceKey
+                    );
+
+            try (Connection connection =
+                         ds.getConnection();
+
+                 PreparedStatement ps =
+                         connection.prepareStatement(
+                                 metadata.validationQuery()
+                         );
+
+                 ResultSet rs =
+                         ps.executeQuery()) {
+
+                rs.next();
+
+                healthCache.put(
+                        datasourceKey,
+                        new DataSourceHealth(
+                                datasourceKey,
+                                true,
+                                true,
+                                System.currentTimeMillis(),
+                                "UP"
+                        )
+                );
+            }
+
+        } catch (Exception ex) {
+
+            healthCache.put(
+                    datasourceKey,
+                    new DataSourceHealth(
+                            datasourceKey,
+                            true,
+                            false,
+                            System.currentTimeMillis(),
+                            ex.getMessage()
+                    )
+            );
+        }
+    }
+}
