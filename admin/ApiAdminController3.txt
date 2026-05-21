@@ -1,0 +1,571 @@
+package com.mas.sap.prak.admin.controller;
+
+import com.mas.sap.prak.admin.dto.ApiRegistrationRequest;
+import com.mas.sap.prak.admin.service.ApiAdminService;
+import com.mas.sap.prak.swagger.SwaggerTaskService;
+import org.slf4j.MDC;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.Map;
+import java.util.UUID;
+
+@RestController
+@RequestMapping("/admin/apis")
+public class ApiAdminController {
+
+    private final ApiAdminService service;
+
+    private final SwaggerTaskService swaggerTaskService;
+
+    public ApiAdminController(
+            ApiAdminService service,
+            SwaggerTaskService swaggerTaskService
+    ) {
+
+        this.service = service;
+
+        this.swaggerTaskService =
+                swaggerTaskService;
+    }
+
+    // =====================================================
+    // REGISTER NEW API
+    // =====================================================
+
+    @PostMapping
+    public Object register(
+            @RequestBody ApiRegistrationRequest request
+    ) {
+
+        long start =
+                System.currentTimeMillis();
+
+        try {
+
+            MDC.put(
+                    "operation",
+                    "register-api"
+            );
+
+            MDC.put(
+                    "apiPath",
+                    request.apiPath()
+            );
+
+            MDC.put(
+                    "datasourceKey",
+                    request.datasourceKey()
+            );
+
+            UUID apiId =
+                    service.register(
+                            request
+                    );
+
+            // =====================================================
+            // ASYNC SWAGGER GENERATION
+            // =====================================================
+
+            swaggerTaskService.submit(
+                    apiId
+            );
+
+            return Map.of(
+
+                    "status",
+                    "SUCCESS",
+
+                    "apiId",
+                    apiId,
+
+                    "swaggerTask",
+                    "SCHEDULED",
+
+                    "message",
+                    "API registered successfully"
+            );
+
+        } catch (Exception ex) {
+
+            return Map.of(
+
+                    "status",
+                    "ERROR",
+
+                    "message",
+                    ex.getMessage()
+            );
+
+        } finally {
+
+            MDC.put(
+                    "durationMs",
+                    String.valueOf(
+                            System.currentTimeMillis() - start
+                    )
+            );
+
+            MDC.clear();
+        }
+    }
+
+    // =====================================================
+    // LIST APIS
+    // =====================================================
+
+    @GetMapping
+    public Object listApis() {
+
+        try {
+
+            MDC.put(
+                    "operation",
+                    "list-apis"
+            );
+
+            return Map.of(
+
+                    "status",
+                    "SUCCESS",
+
+                    "data",
+                    service.listApis()
+            );
+
+        } catch (Exception ex) {
+
+            return Map.of(
+
+                    "status",
+                    "ERROR",
+
+                    "message",
+                    ex.getMessage()
+            );
+
+        } finally {
+
+            MDC.clear();
+        }
+    }
+
+    // =====================================================
+    // GET API DETAILS
+    // =====================================================
+
+    @GetMapping("/{apiId}")
+    public Object getApi(
+            @PathVariable UUID apiId
+    ) {
+
+        try {
+
+            MDC.put(
+                    "operation",
+                    "get-api"
+            );
+
+            MDC.put(
+                    "apiId",
+                    apiId.toString()
+            );
+
+            return Map.of(
+
+                    "status",
+                    "SUCCESS",
+
+                    "data",
+                    service.getApi(
+                            apiId
+                    )
+            );
+
+        } catch (Exception ex) {
+
+            return Map.of(
+
+                    "status",
+                    "ERROR",
+
+                    "message",
+                    ex.getMessage()
+            );
+
+        } finally {
+
+            MDC.clear();
+        }
+    }
+
+    // =====================================================
+    // GET API TABLES
+    // =====================================================
+
+    @GetMapping("/{apiId}/tables")
+    public Object getTables(
+            @PathVariable UUID apiId
+    ) {
+
+        try {
+
+            MDC.put(
+                    "operation",
+                    "get-api-tables"
+            );
+
+            return Map.of(
+
+                    "status",
+                    "SUCCESS",
+
+                    "data",
+                    service.getTables(
+                            apiId
+                    )
+            );
+
+        } catch (Exception ex) {
+
+            return Map.of(
+
+                    "status",
+                    "ERROR",
+
+                    "message",
+                    ex.getMessage()
+            );
+
+        } finally {
+
+            MDC.clear();
+        }
+    }
+
+    // =====================================================
+    // GET TABLE COLUMNS
+    // =====================================================
+
+    @GetMapping("/{apiId}/tables/{tableId}/columns")
+    public Object getColumns(
+            @PathVariable UUID apiId,
+            @PathVariable UUID tableId
+    ) {
+
+        try {
+
+            MDC.put(
+                    "operation",
+                    "get-table-columns"
+            );
+
+            return Map.of(
+
+                    "status",
+                    "SUCCESS",
+
+                    "data",
+                    service.getColumns(
+                            apiId,
+                            tableId
+                    )
+            );
+
+        } catch (Exception ex) {
+
+            return Map.of(
+
+                    "status",
+                    "ERROR",
+
+                    "message",
+                    ex.getMessage()
+            );
+
+        } finally {
+
+            MDC.clear();
+        }
+    }
+
+    // =====================================================
+    // GET SWAGGER
+    // =====================================================
+
+    @GetMapping("/{apiId}/swagger")
+    public Object getSwagger(
+            @PathVariable UUID apiId
+    ) {
+
+        try {
+
+            MDC.put(
+                    "operation",
+                    "get-swagger"
+            );
+
+            return Map.of(
+
+                    "status",
+                    "SUCCESS",
+
+                    "data",
+                    service.getSwagger(
+                            apiId
+                    )
+            );
+
+        } catch (Exception ex) {
+
+            return Map.of(
+
+                    "status",
+                    "ERROR",
+
+                    "message",
+                    ex.getMessage()
+            );
+
+        } finally {
+
+            MDC.clear();
+        }
+    }
+
+    // =====================================================
+    // REGENERATE SWAGGER
+    // =====================================================
+
+    @PostMapping("/{apiId}/swagger/regenerate")
+    public Object regenerateSwagger(
+            @PathVariable UUID apiId
+    ) {
+
+        try {
+
+            MDC.put(
+                    "operation",
+                    "regenerate-swagger"
+            );
+
+            swaggerTaskService.submit(
+                    apiId
+            );
+
+            return Map.of(
+
+                    "status",
+                    "SUCCESS",
+
+                    "message",
+                    "Swagger regeneration scheduled"
+            );
+
+        } catch (Exception ex) {
+
+            return Map.of(
+
+                    "status",
+                    "ERROR",
+
+                    "message",
+                    ex.getMessage()
+            );
+
+        } finally {
+
+            MDC.clear();
+        }
+    }
+
+    // =====================================================
+    // DELETE API
+    // =====================================================
+
+    @DeleteMapping("/{apiId}")
+    public Object deleteApi(
+            @PathVariable UUID apiId
+    ) {
+
+        try {
+
+            MDC.put(
+                    "operation",
+                    "delete-api"
+            );
+
+            service.deleteApi(
+                    apiId
+            );
+
+            return Map.of(
+
+                    "status",
+                    "SUCCESS",
+
+                    "message",
+                    "API deleted successfully"
+            );
+
+        } catch (Exception ex) {
+
+            return Map.of(
+
+                    "status",
+                    "ERROR",
+
+                    "message",
+                    ex.getMessage()
+            );
+
+        } finally {
+
+            MDC.clear();
+        }
+    }
+
+    // =====================================================
+    // SWAGGER EXPLORER VIEW
+    // =====================================================
+
+    @GetMapping(
+            value = "/view",
+            produces = "text/html"
+    )
+    public String viewApis() {
+
+        return """
+            <html>
+
+            <head>
+
+                <title>
+                    Dynamic DSL API Explorer
+                </title>
+
+                <style>
+
+                    body {
+                        font-family: Arial;
+                        padding: 20px;
+                    }
+
+                    .card {
+                        border: 1px solid #ccc;
+                        border-radius: 5px;
+                        padding: 15px;
+                        margin-bottom: 15px;
+                    }
+
+                    button {
+                        background: #1976d2;
+                        color: white;
+                        border: none;
+                        padding: 10px;
+                        border-radius: 4px;
+                        cursor: pointer;
+                        margin-right: 5px;
+                    }
+
+                </style>
+
+            </head>
+
+            <body>
+
+            <h1>
+                Dynamic PostgreSQL DSL APIs
+            </h1>
+
+            <div id='apis'></div>
+
+            <script>
+
+            fetch('/admin/apis')
+                .then(r => r.json())
+                .then(resp => {
+
+                    let html = '';
+
+                    resp.data.forEach(api => {
+
+                        html += `
+
+                            <div class='card'>
+
+                                <h2>
+                                    ${api.apiName}
+                                </h2>
+
+                                <p>
+                                    <b>Domain:</b>
+                                    ${api.domain}
+                                </p>
+
+                                <p>
+                                    <b>Path:</b>
+                                    ${api.apiPath}
+                                </p>
+
+                                <p>
+                                    <b>Datasource:</b>
+                                    ${api.datasourceKey}
+                                </p>
+
+                                <button onclick="
+                                    window.open(
+                                        '/swagger-ui/index.html?url=/admin/apis/'
+                                        + '${api.apiId}'
+                                        + '/swagger'
+                                    )
+                                ">
+                                    Swagger
+                                </button>
+
+                                <button onclick="
+                                    window.open(
+                                        '/swagger/apis/'
+                                        + '${api.apiId}'
+                                        + '/dsl-example'
+                                    )
+                                ">
+                                    DSL Example
+                                </button>
+
+                                <button onclick="
+                                    regenerateSwagger('${api.apiId}')
+                                ">
+                                    Regenerate Swagger
+                                </button>
+
+                            </div>
+                        `;
+                    });
+
+                    document.getElementById('apis')
+                        .innerHTML = html;
+                });
+
+            function regenerateSwagger(apiId) {
+
+                fetch(
+                    '/admin/apis/' + apiId + '/swagger/regenerate',
+                    {
+                        method: 'POST'
+                    }
+                )
+                .then(r => r.json())
+                .then(resp => {
+
+                    alert(resp.message);
+                });
+            }
+
+            </script>
+
+            </body>
+
+            </html>
+            """;
+    }
+}
