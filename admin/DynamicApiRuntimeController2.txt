@@ -1,0 +1,301 @@
+package com.mas.sap.prak.runtime;
+
+import com.mas.sap.prak.audit.AuditService;
+import com.mas.sap.prak.cache.ApiMetadataCacheService;
+import com.mas.sap.prak.cache.DataSourceHealthCache;
+import com.mas.sap.prak.datasource.DynamicDataSourceService;
+import com.mas.sap.prak.datasource.RequestDataSourceContext;
+import com.mas.sap.prak.datasource.DataSourceHealth;
+import com.mas.sap.prak.dsl.DslValidator;
+import com.mas.sap.prak.dsl.ElasticDslToSqlTranslator;
+import com.mas.sap.prak.registry.ApiMetadata;
+import com.mas.sap.prak.security.RequestContext;
+import com.mas.sap.prak.security.RequestContextResolver;
+import jakarta.servlet.http.HttpServletRequest;
+import org.slf4j.MDC;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.SingleConnectionDataSource;
+import org.springframework.web.bind.annotation.*;
+
+import javax.sql.DataSource;
+import java.sql.Connection;
+import java.util.Map;
+
+@RestController
+public class DynamicApiRuntimeController {
+
+    private final ApiMetadataCacheService cacheService;
+
+    private final DataSourceHealthCache healthCache;
+
+    private final DslValidator validator;
+
+    private final ElasticDslToSqlTranslator translator;
+
+    private final DynamicDataSourceService dataSourceService;
+
+    private final RequestContextResolver contextResolver;
+
+    private final AuditService auditService;
+
+    private final RateLimitService rateLimitService;
+
+    public DynamicApiRuntimeController(
+            ApiMetadataCacheService cacheService,
+            DataSourceHealthCache healthCache,
+            DslValidator validator,
+            ElasticDslToSqlTranslator translator,
+            DynamicDataSourceService dataSourceService,
+            RequestContextResolver contextResolver,
+            AuditService auditService,
+            RateLimitService rateLimitService
+    ) {
+
+        this.cacheService = cacheService;
+        this.healthCache = healthCache;
+        this.validator = validator;
+        this.translator = translator;
+        this.dataSourceService = dataSourceService;
+        this.contextResolver = contextResolver;
+        this.auditService = auditService;
+        this.rateLimitService = rateLimitService;
+    }
+
+    @PostMapping("/dynamic/**")
+    public Object execute(
+            HttpServletRequest request,
+            @RequestBody Map<String, Object> body
+    ) {
+
+        long start =
+                System.currentTimeMillis();
+
+        String apiPath =
+                request.getRequestURI()
+                        .replaceFirst(
+                                "/dynamic",
+                                ""
+                        );
+
+        RequestContext ctx =
+                contextResolver.resolve(
+                        request
+                );
+
+        MDC.put(
+                "tenantId",
+                ctx.tenantId()
+        );
+
+        MDC.put(
+                "consumerId",
+                ctx.consumerId()
+        );
+
+        MDC.put(
+                "userId",
+                ctx.userId()
+        );
+
+        MDC.put(
+                "apiPath",
+                apiPath
+        );
+
+        Object response = null;
+
+        int status = 200;
+
+        String datasourceKey = null;
+
+        try {
+
+            // =====================================================
+            // RATE LIMIT
+            // =====================================================
+
+            rateLimitService.check(
+                    ctx.consumerId()
+            );
+
+            // =====================================================
+            // LOAD API METADATA FROM IGNITE CACHE
+            // =====================================================
+
+            String cacheKey =
+                    "POST:" + apiPath;
+
+            ApiMetadata metadata =
+                    cacheService.getApi(
+                            cacheKey
+                    );
+
+            if (metadata == null) {
+
+                throw new IllegalStateException(
+                        "API metadata not found in cache: "
+                                + cacheKey
+                );
+            }
+
+            datasourceKey =
+                    metadata.datasourceKey();
+
+            MDC.put(
+                    "datasourceKey",
+                    datasourceKey
+            );
+
+            // =====================================================
+            // DATASOURCE HEALTH CHECK
+            // =====================================================
+
+            DataSourceHealth health =
+                    healthCache.get(
+                            datasourceKey
+                    );
+
+            if (health == null) {
+
+                throw new IllegalStateException(
+                        "Datasource health unavailable: "
+                                + datasourceKey
+                );
+            }
+
+            if (!health.healthy()) {
+
+                throw new IllegalStateException(
+                        "Datasource unhealthy: "
+                                + datasourceKey
+                                + " reason="
+                                + health.statusMessage()
+                );
+            }
+
+            // =====================================================
+            // ATTACH DATASOURCE TO REQUEST CONTEXT
+            // =====================================================
+
+            RequestDataSourceContext.set(
+                    datasourceKey
+            );
+
+            // =====================================================
+            // VALIDATE ELASTIC DSL
+            // =====================================================
+
+            validator.validate(
+                    metadata,
+                    body
+            );
+
+            // =====================================================
+            // TRANSLATE DSL → SQL
+            // =====================================================
+
+            String sql =
+                    translator.translate(
+                            metadata,
+                            body
+                    );
+
+            MDC.put(
+                    "generatedSql",
+                    sql
+            );
+
+            // =====================================================
+            // RESOLVE DATASOURCE
+            // =====================================================
+
+            DataSource ds =
+                    dataSourceService.getDataSource(
+                            datasourceKey
+                    );
+
+            // =====================================================
+            // ISOLATED REQUEST CONNECTION
+            // =====================================================
+
+            try (
+                    Connection connection =
+                            ds.getConnection()
+            ) {
+
+                connection.setAutoCommit(
+                        false
+                );
+
+                connection.setTransactionIsolation(
+                        Connection.TRANSACTION_READ_COMMITTED
+                );
+
+                JdbcTemplate jdbcTemplate =
+                        new JdbcTemplate(
+                                new SingleConnectionDataSource(
+                                        connection,
+                                        false
+                                )
+                        );
+
+                response =
+                        jdbcTemplate.queryForList(
+                                sql
+                        );
+
+                connection.commit();
+            }
+
+            return response;
+
+        } catch (Exception ex) {
+
+            status = 500;
+
+            MDC.put(
+                    "exception",
+                    ex.getMessage()
+            );
+
+            response =
+                    Map.of(
+                            "status",
+                            "ERROR",
+
+                            "message",
+                            ex.getMessage(),
+
+                            "apiPath",
+                            apiPath,
+
+                            "datasourceKey",
+                            datasourceKey
+                    );
+
+            return response;
+
+        } finally {
+
+            try {
+
+                auditService.audit(
+                        apiPath,
+                        ctx,
+                        body,
+                        response,
+                        status,
+                        System.currentTimeMillis() - start
+                );
+
+            } catch (Exception auditEx) {
+
+                // never fail request due to audit failure
+            }
+
+            RequestDataSourceContext.clear();
+
+            MDC.clear();
+        }
+    }
+}
