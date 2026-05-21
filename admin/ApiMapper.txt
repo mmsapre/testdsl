@@ -1,0 +1,101 @@
+package com.mas.sap.prak.admin.mapper;
+
+import com.mas.sap.prak.admin.dto.*;
+import com.mas.sap.prak.admin.record.*;
+
+import java.time.LocalDateTime;
+import java.util.*;
+
+public class ApiMapper {
+
+    public ApiRegistryRecord toApiRecord(
+            UUID apiId,
+            ApiRegistrationRequest request
+    ) {
+
+        return new ApiRegistryRecord(
+
+                apiId,
+
+                request.domain(),
+
+                request.apiName(),
+
+                request.apiPath(),
+
+                request.method(),
+
+                request.datasourceKey(),
+
+                "ACTIVE",
+
+                LocalDateTime.now(),
+
+                LocalDateTime.now()
+        );
+    }
+
+    public List<AllowedTableRecord> toTableRecords(
+            UUID apiId,
+            ApiRegistrationRequest request
+    ) {
+
+        List<AllowedTableRecord> result =
+                new ArrayList<>();
+
+        for (TableRequest table :
+                request.tables()) {
+
+            result.add(
+                    new AllowedTableRecord(
+
+                            UUID.randomUUID(),
+
+                            apiId,
+
+                            table.tableName(),
+
+                            table.aliasName()
+                    )
+            );
+        }
+
+        return result;
+    }
+
+    public List<AllowedColumnRecord> toColumnRecords(
+            AllowedTableRecord tableRecord,
+            TableRequest tableRequest
+    ) {
+
+        List<AllowedColumnRecord> result =
+                new ArrayList<>();
+
+        for (ColumnRequest column :
+                tableRequest.columns()) {
+
+            result.add(
+                    new AllowedColumnRecord(
+
+                            UUID.randomUUID(),
+
+                            tableRecord.tableId(),
+
+                            column.columnName(),
+
+                            column.columnAlias(),
+
+                            column.dataType(),
+
+                            column.selectable(),
+
+                            column.filterable(),
+
+                            column.sortable()
+                    )
+            );
+        }
+
+        return result;
+    }
+}
