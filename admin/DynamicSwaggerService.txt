@@ -1,0 +1,348 @@
+package com.mas.sap.prak.swagger;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.mas.sap.prak.cache.ApiMetadataCacheService;
+import com.mas.sap.prak.registry.*;
+import io.swagger.v3.oas.models.*;
+import io.swagger.v3.oas.models.info.Info;
+import io.swagger.v3.oas.models.media.*;
+import io.swagger.v3.oas.models.parameters.RequestBody;
+import io.swagger.v3.oas.models.responses.*;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Service;
+
+import java.util.*;
+
+@Service
+public class DynamicSwaggerService {
+
+    private final JdbcTemplate jdbcTemplate;
+
+    private final ApiRegistryService registryService;
+
+    private final ApiMetadataCacheService cacheService;
+
+    private final ObjectMapper mapper =
+            new ObjectMapper();
+
+    public DynamicSwaggerService(
+            JdbcTemplate jdbcTemplate,
+            ApiRegistryService registryService,
+            ApiMetadataCacheService cacheService
+    ) {
+
+        this.jdbcTemplate = jdbcTemplate;
+        this.registryService = registryService;
+        this.cacheService = cacheService;
+    }
+
+    public void generateAndStore(
+            UUID apiId
+    ) throws Exception {
+
+        ApiMetadata metadata =
+                registryService.loadApiMetadata(apiId);
+
+        OpenAPI openAPI =
+                buildSwagger(metadata);
+
+        String swaggerJson =
+                mapper.writerWithDefaultPrettyPrinter()
+                        .writeValueAsString(openAPI);
+
+        jdbcTemplate.update(
+                """
+                update api_registry
+                set swagger_json = ?::jsonb,
+                    updated_at = now()
+                where api_id = ?
+                """,
+                swaggerJson,
+                apiId
+        );
+
+        cacheService.putSwagger(
+                apiId,
+                swaggerJson
+        );
+    }
+
+    private OpenAPI buildSwagger(
+            ApiMetadata metadata
+    ) {
+
+        OpenAPI openAPI =
+                new OpenAPI();
+
+        openAPI.setInfo(
+                new Info()
+                        .title(metadata.apiName())
+                        .version("1.0.0")
+                        .description(
+                                "ElasticSearch style PostgreSQL DSL API"
+                        )
+        );
+
+        Components components =
+                new Components();
+
+        components.addSchemas(
+                "DslQuery",
+                buildDslSchema(metadata)
+        );
+
+        openAPI.setComponents(
+                components
+        );
+
+        Operation operation =
+                buildOperation(metadata);
+
+        PathItem pathItem =
+                new PathItem();
+
+        pathItem.post(operation);
+
+        openAPI.setPaths(
+                new Paths()
+                        .addPathItem(
+                                metadata.apiPath(),
+                                pathItem
+                        )
+        );
+
+        return openAPI;
+    }
+
+    private Operation buildOperation(
+            ApiMetadata metadata
+    ) {
+
+        Operation operation =
+                new Operation();
+
+        operation.setSummary(
+                "Dynamic PostgreSQL DSL Query"
+        );
+
+        operation.setDescription(
+                "Generated from allowed tables and columns"
+        );
+
+        RequestBody requestBody =
+                new RequestBody();
+
+        requestBody.setRequired(true);
+
+        requestBody.setContent(
+                new Content()
+                        .addMediaType(
+                                "application/json",
+                                new MediaType()
+                                        .schema(
+                                                new Schema<>()
+                                                        .$ref(
+                                                                "#/components/schemas/DslQuery"
+                                                        )
+                                        )
+                        )
+        );
+
+        operation.setRequestBody(
+                requestBody
+        );
+
+        ApiResponses responses =
+                new ApiResponses();
+
+        responses.addApiResponse(
+                "200",
+                new ApiResponse()
+                        .description("Success")
+        );
+
+        operation.setResponses(
+                responses
+        );
+
+        operation.addExtension(
+                "x-dsl-example",
+                buildDslExample(metadata)
+        );
+
+        return operation;
+    }
+
+    private Schema<?> buildDslSchema(
+            ApiMetadata metadata
+    ) {
+
+        ObjectSchema schema =
+                new ObjectSchema();
+
+        // =====================================================
+        // SELECT
+        // =====================================================
+
+        StringSchema selectItems =
+                new StringSchema();
+
+        for (TableMetadata table :
+                metadata.tables()) {
+
+            for (ColumnMetadata column :
+                    table.columns()) {
+
+                if (column.selectable()) {
+
+                    selectItems.addEnumItem(
+                            table.aliasName()
+                                    + "."
+                                    + column.columnAlias()
+                    );
+                }
+            }
+        }
+
+        schema.addProperty(
+                "select",
+                new ArraySchema()
+                        .items(selectItems)
+        );
+
+        // =====================================================
+        // FROM
+        // =====================================================
+
+        schema.addProperty(
+                "from",
+                new ArraySchema()
+                        .items(
+                                new ObjectSchema()
+                                        .addProperty(
+                                                "table",
+                                                new StringSchema()
+                                        )
+                                        .addProperty(
+                                                "alias",
+                                                new StringSchema()
+                                        )
+                        )
+        );
+
+        // =====================================================
+        // JOINS
+        // =====================================================
+
+        schema.addProperty(
+                "joins",
+                new ArraySchema()
+                        .items(
+                                new ObjectSchema()
+                                        .addProperty(
+                                                "left",
+                                                new StringSchema()
+                                        )
+                                        .addProperty(
+                                                "right",
+                                                new StringSchema()
+                                        )
+                                        .addProperty(
+                                                "type",
+                                                new StringSchema()
+                                                        ._enum(
+                                                                List.of(
+                                                                        "INNER",
+                                                                        "LEFT",
+                                                                        "RIGHT"
+                                                                )
+                                                        )
+                                        )
+                        )
+        );
+
+        // =====================================================
+        // QUERY
+        // =====================================================
+
+        schema.addProperty(
+                "query",
+                new ObjectSchema()
+        );
+
+        schema.addProperty(
+                "limit",
+                new IntegerSchema()
+        );
+
+        schema.addProperty(
+                "offset",
+                new IntegerSchema()
+        );
+
+        return schema;
+    }
+
+    private Map<String, Object> buildDslExample(
+            ApiMetadata metadata
+    ) {
+
+        Map<String, Object> root =
+                new LinkedHashMap<>();
+
+        List<String> select =
+                new ArrayList<>();
+
+        List<Map<String, Object>> from =
+                new ArrayList<>();
+
+        for (TableMetadata table :
+                metadata.tables()) {
+
+            Map<String, Object> tableMap =
+                    new LinkedHashMap<>();
+
+            tableMap.put(
+                    "table",
+                    table.tableName()
+            );
+
+            tableMap.put(
+                    "alias",
+                    table.aliasName()
+            );
+
+            from.add(tableMap);
+
+            table.columns()
+                    .stream()
+                    .limit(2)
+                    .forEach(c ->
+                            select.add(
+                                    table.aliasName()
+                                            + "."
+                                            + c.columnAlias()
+                            )
+                    );
+        }
+
+        root.put("select", select);
+        root.put("from", from);
+
+        root.put(
+                "query",
+                Map.of(
+                        "bool",
+                        Map.of(
+                                "must",
+                                List.of()
+                        )
+                )
+        );
+
+        root.put("limit", 100);
+        root.put("offset", 0);
+
+        return root;
+    }
+}
