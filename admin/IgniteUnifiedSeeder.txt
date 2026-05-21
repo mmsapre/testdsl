@@ -1,0 +1,440 @@
+package com.mas.sap.prak.cache;
+
+import com.mas.sap.prak.datasource.DataSourceMetadata;
+import com.mas.sap.prak.registry.*;
+import jakarta.annotation.PostConstruct;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Component;
+
+import java.util.*;
+
+@Component
+public class IgniteUnifiedSeeder {
+
+    private static final Logger log =
+            LoggerFactory.getLogger(
+                    IgniteUnifiedSeeder.class
+            );
+
+    private final JdbcTemplate jdbcTemplate;
+
+    private final ApiMetadataCacheService cacheService;
+
+    public IgniteUnifiedSeeder(
+            JdbcTemplate jdbcTemplate,
+            ApiMetadataCacheService cacheService
+    ) {
+
+        this.jdbcTemplate = jdbcTemplate;
+        this.cacheService = cacheService;
+    }
+
+    // =====================================================
+    // INITIAL LOAD
+    // =====================================================
+
+    @PostConstruct
+    public void startupLoad() {
+
+        log.info(
+                "Starting Ignite unified cache seeding..."
+        );
+
+        refreshAll();
+
+        log.info(
+                "Ignite unified cache seeding completed"
+        );
+    }
+
+    // =====================================================
+    // SCHEDULED REFRESH
+    // =====================================================
+
+    @Scheduled(
+            fixedDelay = 60 * 60 * 1000
+    )
+    public void scheduledRefresh() {
+
+        log.info(
+                "Starting scheduled Ignite cache refresh..."
+        );
+
+        refreshAll();
+
+        log.info(
+                "Scheduled Ignite cache refresh completed"
+        );
+    }
+
+    // =====================================================
+    // MAIN REFRESH METHOD
+    // =====================================================
+
+    public synchronized void refreshAll() {
+
+        clearCaches();
+
+        loadApis();
+
+        loadDatasources();
+
+        loadSwagger();
+
+        log.info(
+                "Ignite cache refresh completed successfully"
+        );
+    }
+
+    // =====================================================
+    // CLEAR EXISTING CACHES
+    // =====================================================
+
+    private void clearCaches() {
+
+        cacheService.clear();
+
+        log.info(
+                "Ignite caches cleared"
+        );
+    }
+
+    // =====================================================
+    // LOAD APIS
+    // =====================================================
+
+    private void loadApis() {
+
+        List<Map<String, Object>> apis =
+                jdbcTemplate.queryForList(
+                        """
+                        select api_id,
+                               domain,
+                               api_name,
+                               api_path,
+                               http_method,
+                               datasource_key
+                        from api_registry
+                        where status = 'ACTIVE'
+                        """
+                );
+
+        for (Map<String, Object> api : apis) {
+
+            UUID apiId =
+                    (UUID) api.get("api_id");
+
+            ApiMetadata metadata =
+                    buildApiMetadata(
+                            apiId,
+                            api
+                    );
+
+            String cacheKey =
+                    api.get("http_method")
+                            .toString()
+                            .toUpperCase()
+                            + ":"
+                            + api.get("api_path");
+
+            cacheService.putApi(
+                    cacheKey,
+                    metadata
+            );
+
+            log.info(
+                    "Cached API metadata: {}",
+                    cacheKey
+            );
+        }
+    }
+
+    // =====================================================
+    // BUILD API METADATA
+    // =====================================================
+
+    private ApiMetadata buildApiMetadata(
+            UUID apiId,
+            Map<String, Object> api
+    ) {
+
+        List<TableMetadata> tables =
+                loadTables(apiId);
+
+        return new ApiMetadata(
+
+                apiId,
+
+                String.valueOf(
+                        api.get("domain")
+                ),
+
+                String.valueOf(
+                        api.get("api_name")
+                ),
+
+                String.valueOf(
+                        api.get("api_path")
+                ),
+
+                String.valueOf(
+                        api.get("http_method")
+                ),
+
+                String.valueOf(
+                        api.get("datasource_key")
+                ),
+
+                tables,
+
+                List.of()
+        );
+    }
+
+    // =====================================================
+    // LOAD TABLES
+    // =====================================================
+
+    private List<TableMetadata> loadTables(
+            UUID apiId
+    ) {
+
+        List<Map<String, Object>> rows =
+                jdbcTemplate.queryForList(
+                        """
+                        select table_id,
+                               table_name,
+                               alias_name
+                        from api_allowed_table
+                        where api_id = ?
+                        """,
+                        apiId
+                );
+
+        List<TableMetadata> result =
+                new ArrayList<>();
+
+        for (Map<String, Object> row : rows) {
+
+            UUID tableId =
+                    (UUID) row.get("table_id");
+
+            result.add(
+                    new TableMetadata(
+
+                            tableId,
+
+                            String.valueOf(
+                                    row.get("table_name")
+                            ),
+
+                            String.valueOf(
+                                    row.get("alias_name")
+                            ),
+
+                            loadColumns(tableId)
+                    )
+            );
+        }
+
+        return result;
+    }
+
+    // =====================================================
+    // LOAD COLUMNS
+    // =====================================================
+
+    private List<ColumnMetadata> loadColumns(
+            UUID tableId
+    ) {
+
+        List<Map<String, Object>> rows =
+                jdbcTemplate.queryForList(
+                        """
+                        select column_name,
+                               column_alias,
+                               data_type,
+                               selectable,
+                               filterable,
+                               sortable
+                        from api_allowed_column
+                        where table_id = ?
+                        """,
+                        tableId
+                );
+
+        List<ColumnMetadata> columns =
+                new ArrayList<>();
+
+        for (Map<String, Object> row : rows) {
+
+            columns.add(
+                    new ColumnMetadata(
+
+                            String.valueOf(
+                                    row.get("column_name")
+                            ),
+
+                            String.valueOf(
+                                    row.get("column_alias")
+                            ),
+
+                            String.valueOf(
+                                    row.get("data_type")
+                            ),
+
+                            (Boolean) row.get(
+                                    "selectable"
+                            ),
+
+                            (Boolean) row.get(
+                                    "filterable"
+                            ),
+
+                            (Boolean) row.get(
+                                    "sortable"
+                            )
+                    )
+            );
+        }
+
+        return columns;
+    }
+
+    // =====================================================
+    // LOAD DATASOURCES
+    // =====================================================
+
+    private void loadDatasources() {
+
+        List<Map<String, Object>> rows =
+                jdbcTemplate.queryForList(
+                        """
+                        select datasource_key,
+                               datasource_name,
+                               jdbc_url,
+                               username,
+                               password,
+                               driver_class_name,
+                               max_pool_size,
+                               validation_query,
+                               validation_enabled,
+                               datasource_enabled,
+                               connection_timeout_ms,
+                               idle_timeout_ms,
+                               max_lifetime_ms
+                        from datasource_registry
+                        """
+                );
+
+        for (Map<String, Object> row : rows) {
+
+            DataSourceMetadata metadata =
+                    new DataSourceMetadata(
+
+                            String.valueOf(
+                                    row.get("datasource_key")
+                            ),
+
+                            String.valueOf(
+                                    row.get("datasource_name")
+                            ),
+
+                            String.valueOf(
+                                    row.get("jdbc_url")
+                            ),
+
+                            String.valueOf(
+                                    row.get("username")
+                            ),
+
+                            String.valueOf(
+                                    row.get("password")
+                            ),
+
+                            String.valueOf(
+                                    row.get("driver_class_name")
+                            ),
+
+                            (Integer) row.get(
+                                    "max_pool_size"
+                            ),
+
+                            String.valueOf(
+                                    row.get("validation_query")
+                            ),
+
+                            (Boolean) row.get(
+                                    "validation_enabled"
+                            ),
+
+                            (Boolean) row.get(
+                                    "datasource_enabled"
+                            ),
+
+                            ((Number) row.get(
+                                    "connection_timeout_ms"
+                            )).longValue(),
+
+                            ((Number) row.get(
+                                    "idle_timeout_ms"
+                            )).longValue(),
+
+                            ((Number) row.get(
+                                    "max_lifetime_ms"
+                            )).longValue()
+                    );
+
+            cacheService.putDatasource(
+                    metadata.datasourceKey(),
+                    metadata
+            );
+
+            log.info(
+                    "Cached datasource metadata: {}",
+                    metadata.datasourceKey()
+            );
+        }
+    }
+
+    // =====================================================
+    // LOAD SWAGGER
+    // =====================================================
+
+    private void loadSwagger() {
+
+        List<Map<String, Object>> rows =
+                jdbcTemplate.queryForList(
+                        """
+                        select api_id,
+                               swagger_json::text as swagger_json
+                        from api_registry
+                        where swagger_json is not null
+                        """
+                );
+
+        for (Map<String, Object> row : rows) {
+
+            UUID apiId =
+                    (UUID) row.get("api_id");
+
+            String swagger =
+                    String.valueOf(
+                            row.get("swagger_json")
+                    );
+
+            cacheService.putSwagger(
+                    apiId,
+                    swagger
+            );
+
+            log.info(
+                    "Cached swagger: {}",
+                    apiId
+            );
+        }
+    }
+}
