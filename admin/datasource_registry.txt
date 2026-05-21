@@ -1,0 +1,32 @@
+create table datasource_registry (
+
+    datasource_key varchar(100) primary key,
+
+    datasource_name varchar(200),
+
+    jdbc_url varchar(500),
+
+    username varchar(200),
+
+    password varchar(500),
+
+    driver_class_name varchar(200),
+
+    max_pool_size int default 10,
+
+    validation_query varchar(200) default 'select 1',
+
+    validation_enabled boolean default true,
+
+    datasource_enabled boolean default true,
+
+    connection_timeout_ms bigint default 5000,
+
+    idle_timeout_ms bigint default 60000,
+
+    max_lifetime_ms bigint default 1800000,
+
+    created_at timestamp default now(),
+
+    updated_at timestamp default now()
+);
