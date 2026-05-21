@@ -1,0 +1,89 @@
+package com.mas.sap.prak.admin.service;
+
+import com.mas.sap.prak.admin.dto.*;
+import com.mas.sap.prak.admin.mapper.ApiMapper;
+import com.mas.sap.prak.admin.record.*;
+import com.mas.sap.prak.admin.repository.*;
+import org.springframework.stereotype.Service;
+
+import java.util.List;
+import java.util.UUID;
+
+@Service
+public class ApiAdminService {
+
+    private final ApiRegistryRepository apiRepository;
+
+    private final AllowedTableRepository tableRepository;
+
+    private final AllowedColumnRepository columnRepository;
+
+    private final ApiMapper mapper;
+
+    public ApiAdminService(
+            ApiRegistryRepository apiRepository,
+            AllowedTableRepository tableRepository,
+            AllowedColumnRepository columnRepository,
+            ApiMapper mapper
+    ) {
+
+        this.apiRepository = apiRepository;
+
+        this.tableRepository = tableRepository;
+
+        this.columnRepository = columnRepository;
+
+        this.mapper = mapper;
+    }
+
+    public UUID register(
+            ApiRegistrationRequest request
+    ) throws Exception {
+
+        UUID apiId =
+                UUID.randomUUID();
+
+        ApiRegistryRecord apiRecord =
+                mapper.toApiRecord(
+                        apiId,
+                        request
+                );
+
+        apiRepository.insert(
+                apiRecord
+        );
+
+        List<AllowedTableRecord> tables =
+                mapper.toTableRecords(
+                        apiId,
+                        request
+                );
+
+        for (int i = 0;
+             i < tables.size();
+             i++) {
+
+            AllowedTableRecord tableRecord =
+                    tables.get(i);
+
+            TableRequest tableRequest =
+                    request.tables().get(i);
+
+            tableRepository.insert(
+                    tableRecord
+            );
+
+            List<AllowedColumnRecord> columns =
+                    mapper.toColumnRecords(
+                            tableRecord,
+                            tableRequest
+                    );
+
+            columnRepository.batchInsert(
+                    columns
+            );
+        }
+
+        return apiId;
+    }
+}
