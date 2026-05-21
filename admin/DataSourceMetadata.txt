@@ -1,0 +1,30 @@
+package com.mas.sap.prak.datasource;
+
+public record DataSourceMetadata(
+
+        String datasourceKey,
+
+        String datasourceName,
+
+        String jdbcUrl,
+
+        String username,
+
+        String password,
+
+        String driverClassName,
+
+        Integer maxPoolSize,
+
+        String validationQuery,
+
+        Boolean validationEnabled,
+
+        Boolean datasourceEnabled,
+
+        Long connectionTimeoutMs,
+
+        Long idleTimeoutMs,
+
+        Long maxLifetimeMs
+) {}
