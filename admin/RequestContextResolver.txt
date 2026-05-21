@@ -1,0 +1,20 @@
+package com.mas.sap.prak.security;
+
+import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.stereotype.Component;
+
+@Component
+public class RequestContextResolver {
+
+    public RequestContext resolve(HttpServletRequest request) {
+        String tenantId = request.getHeader("X-Tenant-Id");
+        String consumerId = request.getHeader("X-Consumer-Id");
+        String userId = request.getHeader("X-User-Id");
+
+        if (tenantId == null || consumerId == null) {
+            throw new IllegalArgumentException("Missing tenant or consumer header");
+        }
+
+        return new RequestContext(tenantId, consumerId, userId);
+    }
+}
