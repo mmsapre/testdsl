@@ -1,0 +1,31 @@
+package com.mas.sap.prak.runtime;
+
+import io.github.bucket4j.Bandwidth;
+import io.github.bucket4j.Bucket;
+import io.github.bucket4j.Refill;
+import org.springframework.stereotype.Service;
+
+import java.time.Duration;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+
+@Service
+public class RateLimitService {
+
+    private final Map<String, Bucket> buckets = new ConcurrentHashMap<>();
+
+    public void check(String consumerId) {
+        Bucket bucket = buckets.computeIfAbsent(consumerId, key ->
+                Bucket.builder()
+                        .addLimit(Bandwidth.classic(
+                                100,
+                                Refill.intervally(100, Duration.ofMinutes(1))
+                        ))
+                        .build()
+        );
+
+        if (!bucket.tryConsume(1)) {
+            throw new IllegalStateException("Rate limit exceeded for consumer: " + consumerId);
+        }
+    }
+}
