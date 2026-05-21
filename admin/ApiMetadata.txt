@@ -1,0 +1,30 @@
+package com.mas.sap.prak.registry;
+
+import java.util.List;
+import java.util.UUID;
+
+public record ApiMetadata(
+        UUID apiId,
+        String domain,
+        String apiName,
+        String apiPath,
+        String method,
+        String datasourceKey,
+        List<TableMetadata> tables
+) {}
+
+public record TableMetadata(
+        UUID tableId,
+        String tableName,
+        String aliasName,
+        List<ColumnMetadata> columns
+) {}
+
+public record ColumnMetadata(
+        String columnName,
+        String columnAlias,
+        String dataType,
+        boolean selectable,
+        boolean filterable,
+        boolean sortable
+) {}
