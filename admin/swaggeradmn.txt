@@ -10,3 +10,131 @@ public UUID register(
 
     return apiId;
 }
+@GetMapping("/swagger/apis")
+public List<Map<String, Object>> list() {
+
+    return jdbcTemplate.queryForList(
+            """
+            select api_id,
+                   api_name,
+                   api_path,
+                   domain,
+                   status
+            from api_registry
+            order by api_name
+            """
+    );
+}
+
+@GetMapping("/swagger/apis/{apiId}")
+public String swagger(
+        @PathVariable UUID apiId
+) {
+
+    String swagger =
+            cacheService.getSwagger(apiId);
+
+    if (swagger != null) {
+        return swagger;
+    }
+
+    swagger =
+            jdbcTemplate.queryForObject(
+                    """
+                    select swagger_json::text
+                    from api_registry
+                    where api_id = ?
+                    """,
+                    String.class,
+                    apiId
+            );
+
+    cacheService.putSwagger(
+            apiId,
+            swagger
+    );
+
+    return swagger;
+}
+
+@GetMapping(
+        value = "/swagger/view",
+        produces = "text/html"
+)
+public String view() {
+
+    return """
+        <html>
+
+        <head>
+
+            <title>
+                DSL Swagger Explorer
+            </title>
+
+        </head>
+
+        <body>
+
+        <h1>
+            Dynamic PostgreSQL DSL APIs
+        </h1>
+
+        <div id='apis'></div>
+
+        <script>
+
+        fetch('/swagger/apis')
+            .then(r => r.json())
+            .then(apis => {
+
+                let html = '';
+
+                apis.forEach(api => {
+
+                    html += `
+                        <div style="
+                            border:1px solid #ccc;
+                            padding:15px;
+                            margin:10px;
+                            border-radius:5px;
+                        ">
+
+                            <h2>
+                                ${api.api_name}
+                            </h2>
+
+                            <p>
+                                <b>Path:</b>
+                                ${api.api_path}
+                            </p>
+
+                            <p>
+                                <b>Domain:</b>
+                                ${api.domain}
+                            </p>
+
+                            <button onclick="
+                                window.open(
+                                    '/swagger-ui/index.html?url=/swagger/apis/'
+                                    + '${api.api_id}'
+                                )
+                            ">
+                                Open Swagger
+                            </button>
+
+                        </div>
+                    `;
+                });
+
+                document.getElementById('apis')
+                    .innerHTML = html;
+            });
+
+        </script>
+
+        </body>
+
+        </html>
+        """;
+}
