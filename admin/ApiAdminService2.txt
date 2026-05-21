@@ -1,0 +1,94 @@
+package com.mas.sap.prak.admin.service;
+
+import com.mas.sap.prak.admin.dto.*;
+import com.mas.sap.prak.admin.repository.*;
+import org.springframework.stereotype.Service;
+
+import javax.sql.DataSource;
+import java.sql.Connection;
+import java.util.UUID;
+
+@Service
+public class ApiAdminService {
+
+    private final DataSource mrdDataSource;
+
+    private final ApiRegistryRepository apiRepository;
+
+    private final AllowedTableRepository tableRepository;
+
+    private final AllowedColumnRepository columnRepository;
+
+    public ApiAdminService(
+            DataSource mrdDataSource,
+            ApiRegistryRepository apiRepository,
+            AllowedTableRepository tableRepository,
+            AllowedColumnRepository columnRepository
+    ) {
+
+        this.mrdDataSource = mrdDataSource;
+
+        this.apiRepository = apiRepository;
+
+        this.tableRepository = tableRepository;
+
+        this.columnRepository = columnRepository;
+    }
+
+    public UUID register(
+            ApiRegistrationRequest request
+    ) throws Exception {
+
+        UUID apiId =
+                UUID.randomUUID();
+
+        try (
+                Connection connection =
+                        mrdDataSource.getConnection()
+        ) {
+
+            connection.setAutoCommit(false);
+
+            try {
+
+                apiRepository.insertApi(
+                        apiId,
+                        request.domain(),
+                        request.apiName(),
+                        request.apiPath(),
+                        request.method(),
+                        request.datasourceKey()
+                );
+
+                for (TableRequest table :
+                        request.tables()) {
+
+                    UUID tableId =
+                            UUID.randomUUID();
+
+                    tableRepository.insertTable(
+                            tableId,
+                            apiId,
+                            table.tableName(),
+                            table.aliasName()
+                    );
+
+                    columnRepository.batchInsert(
+                            tableId,
+                            table.columns()
+                    );
+                }
+
+                connection.commit();
+
+            } catch (Exception ex) {
+
+                connection.rollback();
+
+                throw ex;
+            }
+        }
+
+        return apiId;
+    }
+}
