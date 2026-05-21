@@ -1,0 +1,16 @@
+package com.mas.sap.prak.admin.dto;
+
+public record ColumnRequest(
+
+        String columnName,
+
+        String columnAlias,
+
+        String dataType,
+
+        boolean selectable,
+
+        boolean filterable,
+
+        boolean sortable
+) {}
