@@ -1,0 +1,14 @@
+package com.mas.sap.prak.admin.record;
+
+import java.util.UUID;
+
+public record AllowedTableRecord(
+
+        UUID tableId,
+
+        UUID apiId,
+
+        String tableName,
+
+        String aliasName
+) {}
