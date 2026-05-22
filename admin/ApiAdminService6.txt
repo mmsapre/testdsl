@@ -1,0 +1,479 @@
+package com.mas.sap.prak.admin.service;
+
+import com.mas.sap.prak.admin.dto.*;
+import com.mas.sap.prak.admin.mapper.ApiMapper;
+import com.mas.sap.prak.admin.record.*;
+import com.mas.sap.prak.admin.repository.*;
+import com.mas.sap.prak.cache.ApiMetadataCacheService;
+import com.mas.sap.prak.swagger.SwaggerTaskService;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
+
+import javax.sql.DataSource;
+import java.sql.Connection;
+import java.util.*;
+
+@Service
+public class ApiAdminService {
+
+    private static final Logger log =
+            LoggerFactory.getLogger(
+                    ApiAdminService.class
+            );
+
+    private final DataSource mrdDataSource;
+
+    private final ApiRegistryRepository apiRepository;
+
+    private final AllowedTableRepository tableRepository;
+
+    private final AllowedColumnRepository columnRepository;
+
+    private final ApiMapper mapper;
+
+    private final SwaggerTaskService swaggerTaskService;
+
+    private final ApiMetadataCacheService cacheService;
+
+    public ApiAdminService(
+            DataSource mrdDataSource,
+            ApiRegistryRepository apiRepository,
+            AllowedTableRepository tableRepository,
+            AllowedColumnRepository columnRepository,
+            ApiMapper mapper,
+            SwaggerTaskService swaggerTaskService,
+            ApiMetadataCacheService cacheService
+    ) {
+
+        this.mrdDataSource = mrdDataSource;
+
+        this.apiRepository = apiRepository;
+
+        this.tableRepository = tableRepository;
+
+        this.columnRepository = columnRepository;
+
+        this.mapper = mapper;
+
+        this.swaggerTaskService =
+                swaggerTaskService;
+
+        this.cacheService =
+                cacheService;
+    }
+
+    // =====================================================
+    // REGISTER API
+    // =====================================================
+
+    public UUID register(
+            ApiRegistrationRequest request
+    ) throws Exception {
+
+        UUID apiId =
+                UUID.randomUUID();
+
+        try (
+                Connection connection =
+                        mrdDataSource.getConnection()
+        ) {
+
+            connection.setAutoCommit(false);
+
+            try {
+
+                // =====================================================
+                // CREATE API RECORD
+                // =====================================================
+
+                ApiRegistryRecord apiRecord =
+                        mapper.toApiRecord(
+                                apiId,
+                                request
+                        );
+
+                apiRepository.insert(
+                        apiRecord
+                );
+
+                // =====================================================
+                // CREATE TABLE + COLUMN RECORDS
+                // =====================================================
+
+                for (TableRequest table :
+                        request.tables()) {
+
+                    AllowedTableRecord tableRecord =
+                            mapper.toTableRecord(
+                                    apiId,
+                                    table
+                            );
+
+                    tableRepository.insert(
+                            tableRecord
+                    );
+
+                    List<AllowedColumnRecord> columns =
+                            mapper.toColumnRecords(
+                                    tableRecord,
+                                    table
+                            );
+
+                    columnRepository.batchInsert(
+                            columns
+                    );
+                }
+
+                connection.commit();
+
+                log.info(
+                        "API registered successfully: {}",
+                        apiId
+                );
+
+            } catch (Exception ex) {
+
+                connection.rollback();
+
+                throw ex;
+            }
+        }
+
+        // =====================================================
+        // ASYNC SWAGGER GENERATION
+        // =====================================================
+
+        swaggerTaskService.submit(
+                apiId
+        );
+
+        return apiId;
+    }
+
+    // =====================================================
+    // LIST APIS
+    // =====================================================
+
+    public List<Map<String, Object>> listApis()
+            throws Exception {
+
+        List<ApiRegistryRecord> apis =
+                apiRepository.findAll();
+
+        List<Map<String, Object>> result =
+                new ArrayList<>();
+
+        for (ApiRegistryRecord api :
+                apis) {
+
+            Map<String, Object> row =
+                    new LinkedHashMap<>();
+
+            row.put(
+                    "apiId",
+                    api.apiId()
+            );
+
+            row.put(
+                    "domain",
+                    api.domain()
+            );
+
+            row.put(
+                    "apiName",
+                    api.apiName()
+            );
+
+            row.put(
+                    "apiPath",
+                    api.apiPath()
+            );
+
+            row.put(
+                    "method",
+                    api.method()
+            );
+
+            row.put(
+                    "datasourceKey",
+                    api.datasourceKey()
+            );
+
+            row.put(
+                    "status",
+                    api.status()
+            );
+
+            row.put(
+                    "createdAt",
+                    api.createdAt()
+            );
+
+            result.add(row);
+        }
+
+        return result;
+    }
+
+    // =====================================================
+    // GET API DETAILS
+    // =====================================================
+
+    public Object getApi(
+            UUID apiId
+    ) throws Exception {
+
+        Optional<ApiRegistryRecord> api =
+                apiRepository.findById(
+                        apiId
+                );
+
+        if (api.isEmpty()) {
+
+            return Map.of(
+                    "status",
+                    "NOT_FOUND"
+            );
+        }
+
+        Map<String, Object> result =
+                new LinkedHashMap<>();
+
+        result.put(
+                "api",
+                api.get()
+        );
+
+        result.put(
+                "tables",
+                getTables(apiId)
+        );
+
+        result.put(
+                "swagger",
+                getSwagger(apiId)
+        );
+
+        return result;
+    }
+
+    // =====================================================
+    // GET TABLES
+    // =====================================================
+
+    public List<Map<String, Object>> getTables(
+            UUID apiId
+    ) throws Exception {
+
+        List<AllowedTableRecord> tables =
+                tableRepository.findByApiId(
+                        apiId
+                );
+
+        List<Map<String, Object>> result =
+                new ArrayList<>();
+
+        for (AllowedTableRecord table :
+                tables) {
+
+            Map<String, Object> row =
+                    new LinkedHashMap<>();
+
+            row.put(
+                    "tableId",
+                    table.tableId()
+            );
+
+            row.put(
+                    "tableName",
+                    table.tableName()
+            );
+
+            row.put(
+                    "aliasName",
+                    table.aliasName()
+            );
+
+            row.put(
+                    "columns",
+                    getColumns(
+                            apiId,
+                            table.tableId()
+                    )
+            );
+
+            result.add(row);
+        }
+
+        return result;
+    }
+
+    // =====================================================
+    // GET COLUMNS
+    // =====================================================
+
+    public List<Map<String, Object>> getColumns(
+            UUID apiId,
+            UUID tableId
+    ) throws Exception {
+
+        List<AllowedColumnRecord> columns =
+                columnRepository.findByTableId(
+                        tableId
+                );
+
+        List<Map<String, Object>> result =
+                new ArrayList<>();
+
+        for (AllowedColumnRecord column :
+                columns) {
+
+            Map<String, Object> row =
+                    new LinkedHashMap<>();
+
+            row.put(
+                    "columnId",
+                    column.columnId()
+            );
+
+            row.put(
+                    "columnName",
+                    column.columnName()
+            );
+
+            row.put(
+                    "columnAlias",
+                    column.columnAlias()
+            );
+
+            row.put(
+                    "dataType",
+                    column.dataType()
+            );
+
+            row.put(
+                    "selectable",
+                    column.selectable()
+            );
+
+            row.put(
+                    "filterable",
+                    column.filterable()
+            );
+
+            row.put(
+                    "sortable",
+                    column.sortable()
+            );
+
+            result.add(row);
+        }
+
+        return result;
+    }
+
+    // =====================================================
+    // GET SWAGGER
+    // =====================================================
+
+    public Object getSwagger(
+            UUID apiId
+    ) throws Exception {
+
+        Optional<String> swagger =
+                apiRepository.getSwagger(
+                        apiId
+                );
+
+        return swagger.orElse(null);
+    }
+
+    // =====================================================
+    // REGENERATE SWAGGER
+    // =====================================================
+
+    public void regenerateSwagger(
+            UUID apiId
+    ) {
+
+        swaggerTaskService.submit(
+                apiId
+        );
+    }
+
+    // =====================================================
+    // DELETE API
+    // =====================================================
+
+    public void deleteApi(
+            UUID apiId
+    ) throws Exception {
+
+        List<AllowedTableRecord> tables =
+                tableRepository.findByApiId(
+                        apiId
+                );
+
+        for (AllowedTableRecord table :
+                tables) {
+
+            columnRepository.deleteByTableId(
+                    table.tableId()
+            );
+        }
+
+        tableRepository.deleteByApiId(
+                apiId
+        );
+
+        apiRepository.delete(
+                apiId
+        );
+
+        // =====================================================
+        // EVICT CACHE
+        // =====================================================
+
+        cacheService.evictApi(
+                apiId
+        );
+
+        cacheService.evictSwagger(
+                apiId
+        );
+
+        log.info(
+                "API deleted successfully: {}",
+                apiId
+        );
+    }
+
+    // =====================================================
+    // ENABLE API
+    // =====================================================
+
+    public void enableApi(
+            UUID apiId
+    ) throws Exception {
+
+        apiRepository.updateStatus(
+                apiId,
+                "ACTIVE"
+        );
+    }
+
+    // =====================================================
+    // DISABLE API
+    // =====================================================
+
+    public void disableApi(
+            UUID apiId
+    ) throws Exception {
+
+        apiRepository.updateStatus(
+                apiId,
+                "DISABLED"
+        );
+    }
+}
