@@ -1,0 +1,157 @@
+package com.mas.sap.prak.admin.repository;
+
+import com.mas.sap.prak.admin.record.AllowedTableRecord;
+
+import javax.sql.DataSource;
+import java.sql.*;
+import java.util.*;
+
+public class AllowedTableRepository {
+
+    private final DataSource dataSource;
+
+    public AllowedTableRepository(
+            DataSource dataSource
+    ) {
+
+        this.dataSource = dataSource;
+    }
+
+    public void insert(
+            AllowedTableRecord record
+    ) throws Exception {
+
+        String sql =
+                """
+                insert into api_allowed_table
+                (
+                    table_id,
+                    api_id,
+                    table_name,
+                    alias_name
+                )
+                values
+                (?, ?, ?, ?)
+                """;
+
+        try (
+                Connection connection =
+                        dataSource.getConnection();
+
+                PreparedStatement ps =
+                        connection.prepareStatement(sql)
+        ) {
+
+            ps.setObject(
+                    1,
+                    record.tableId()
+            );
+
+            ps.setObject(
+                    2,
+                    record.apiId()
+            );
+
+            ps.setString(
+                    3,
+                    record.tableName()
+            );
+
+            ps.setString(
+                    4,
+                    record.aliasName()
+            );
+
+            ps.executeUpdate();
+        }
+    }
+
+    public List<AllowedTableRecord> findByApiId(
+            UUID apiId
+    ) throws Exception {
+
+        String sql =
+                """
+                select table_id,
+                       api_id,
+                       table_name,
+                       alias_name
+                from api_allowed_table
+                where api_id = ?
+                order by table_name
+                """;
+
+        List<AllowedTableRecord> result =
+                new ArrayList<>();
+
+        try (
+                Connection connection =
+                        dataSource.getConnection();
+
+                PreparedStatement ps =
+                        connection.prepareStatement(sql)
+        ) {
+
+            ps.setObject(
+                    1,
+                    apiId
+            );
+
+            ResultSet rs =
+                    ps.executeQuery();
+
+            while (rs.next()) {
+
+                result.add(
+                        new AllowedTableRecord(
+
+                                (UUID) rs.getObject(
+                                        "table_id"
+                                ),
+
+                                (UUID) rs.getObject(
+                                        "api_id"
+                                ),
+
+                                rs.getString(
+                                        "table_name"
+                                ),
+
+                                rs.getString(
+                                        "alias_name"
+                                )
+                        )
+                );
+            }
+        }
+
+        return result;
+    }
+
+    public void deleteByApiId(
+            UUID apiId
+    ) throws Exception {
+
+        String sql =
+                """
+                delete from api_allowed_table
+                where api_id = ?
+                """;
+
+        try (
+                Connection connection =
+                        dataSource.getConnection();
+
+                PreparedStatement ps =
+                        connection.prepareStatement(sql)
+        ) {
+
+            ps.setObject(
+                    1,
+                    apiId
+            );
+
+            ps.executeUpdate();
+        }
+    }
+}
