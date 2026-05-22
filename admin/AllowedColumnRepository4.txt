@@ -1,0 +1,207 @@
+package com.mas.sap.prak.admin.repository;
+
+import com.mas.sap.prak.admin.record.AllowedColumnRecord;
+
+import javax.sql.DataSource;
+import java.sql.*;
+import java.util.*;
+
+public class AllowedColumnRepository {
+
+    private final DataSource dataSource;
+
+    public AllowedColumnRepository(
+            DataSource dataSource
+    ) {
+
+        this.dataSource = dataSource;
+    }
+
+    public void batchInsert(
+            List<AllowedColumnRecord> records
+    ) throws Exception {
+
+        String sql =
+                """
+                insert into api_allowed_column
+                (
+                    column_id,
+                    table_id,
+                    column_name,
+                    column_alias,
+                    data_type,
+                    selectable,
+                    filterable,
+                    sortable
+                )
+                values
+                (?, ?, ?, ?, ?, ?, ?, ?)
+                """;
+
+        try (
+                Connection connection =
+                        dataSource.getConnection();
+
+                PreparedStatement ps =
+                        connection.prepareStatement(sql)
+        ) {
+
+            for (AllowedColumnRecord record :
+                    records) {
+
+                ps.setObject(
+                        1,
+                        record.columnId()
+                );
+
+                ps.setObject(
+                        2,
+                        record.tableId()
+                );
+
+                ps.setString(
+                        3,
+                        record.columnName()
+                );
+
+                ps.setString(
+                        4,
+                        record.columnAlias()
+                );
+
+                ps.setString(
+                        5,
+                        record.dataType()
+                );
+
+                ps.setBoolean(
+                        6,
+                        record.selectable()
+                );
+
+                ps.setBoolean(
+                        7,
+                        record.filterable()
+                );
+
+                ps.setBoolean(
+                        8,
+                        record.sortable()
+                );
+
+                ps.addBatch();
+            }
+
+            ps.executeBatch();
+        }
+    }
+
+    public List<AllowedColumnRecord> findByTableId(
+            UUID tableId
+    ) throws Exception {
+
+        String sql =
+                """
+                select column_id,
+                       table_id,
+                       column_name,
+                       column_alias,
+                       data_type,
+                       selectable,
+                       filterable,
+                       sortable
+                from api_allowed_column
+                where table_id = ?
+                order by column_name
+                """;
+
+        List<AllowedColumnRecord> result =
+                new ArrayList<>();
+
+        try (
+                Connection connection =
+                        dataSource.getConnection();
+
+                PreparedStatement ps =
+                        connection.prepareStatement(sql)
+        ) {
+
+            ps.setObject(
+                    1,
+                    tableId
+            );
+
+            ResultSet rs =
+                    ps.executeQuery();
+
+            while (rs.next()) {
+
+                result.add(
+                        new AllowedColumnRecord(
+
+                                (UUID) rs.getObject(
+                                        "column_id"
+                                ),
+
+                                (UUID) rs.getObject(
+                                        "table_id"
+                                ),
+
+                                rs.getString(
+                                        "column_name"
+                                ),
+
+                                rs.getString(
+                                        "column_alias"
+                                ),
+
+                                rs.getString(
+                                        "data_type"
+                                ),
+
+                                rs.getBoolean(
+                                        "selectable"
+                                ),
+
+                                rs.getBoolean(
+                                        "filterable"
+                                ),
+
+                                rs.getBoolean(
+                                        "sortable"
+                                )
+                        )
+                );
+            }
+        }
+
+        return result;
+    }
+
+    public void deleteByTableId(
+            UUID tableId
+    ) throws Exception {
+
+        String sql =
+                """
+                delete from api_allowed_column
+                where table_id = ?
+                """;
+
+        try (
+                Connection connection =
+                        dataSource.getConnection();
+
+                PreparedStatement ps =
+                        connection.prepareStatement(sql)
+        ) {
+
+            ps.setObject(
+                    1,
+                    tableId
+            );
+
+            ps.executeUpdate();
+        }
+    }
+}
