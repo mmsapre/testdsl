@@ -1,0 +1,22 @@
+package com.mas.sap.prak.admin.record;
+
+import java.util.UUID;
+
+public record AllowedColumnRecord(
+
+        UUID columnId,
+
+        UUID tableId,
+
+        String columnName,
+
+        String columnAlias,
+
+        String dataType,
+
+        boolean selectable,
+
+        boolean filterable,
+
+        boolean sortable
+) {}
