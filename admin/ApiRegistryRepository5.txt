@@ -1,0 +1,455 @@
+package com.mas.sap.prak.admin.repository;
+
+import com.mas.sap.prak.admin.record.ApiRegistryRecord;
+
+import javax.sql.DataSource;
+import java.sql.*;
+import java.util.*;
+
+public class ApiRegistryRepository {
+
+    private final DataSource dataSource;
+
+    public ApiRegistryRepository(
+            DataSource dataSource
+    ) {
+
+        this.dataSource = dataSource;
+    }
+
+    // =====================================================
+    // INSERT API
+    // =====================================================
+
+    public void insert(
+            ApiRegistryRecord record
+    ) throws Exception {
+
+        String sql =
+                """
+                insert into api_registry
+                (
+                    api_id,
+                    domain,
+                    api_name,
+                    api_path,
+                    http_method,
+                    datasource_key,
+                    status,
+                    created_at,
+                    updated_at
+                )
+                values
+                (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """;
+
+        try (
+                Connection connection =
+                        dataSource.getConnection();
+
+                PreparedStatement ps =
+                        connection.prepareStatement(sql)
+        ) {
+
+            ps.setObject(
+                    1,
+                    record.apiId()
+            );
+
+            ps.setString(
+                    2,
+                    record.domain()
+            );
+
+            ps.setString(
+                    3,
+                    record.apiName()
+            );
+
+            ps.setString(
+                    4,
+                    record.apiPath()
+            );
+
+            ps.setString(
+                    5,
+                    record.method()
+            );
+
+            ps.setString(
+                    6,
+                    record.datasourceKey()
+            );
+
+            ps.setString(
+                    7,
+                    record.status()
+            );
+
+            ps.setObject(
+                    8,
+                    record.createdAt()
+            );
+
+            ps.setObject(
+                    9,
+                    record.updatedAt()
+            );
+
+            ps.executeUpdate();
+        }
+    }
+
+    // =====================================================
+    // FIND BY ID
+    // =====================================================
+
+    public Optional<ApiRegistryRecord> findById(
+            UUID apiId
+    ) throws Exception {
+
+        String sql =
+                """
+                select api_id,
+                       domain,
+                       api_name,
+                       api_path,
+                       http_method,
+                       datasource_key,
+                       status,
+                       created_at,
+                       updated_at
+                from api_registry
+                where api_id = ?
+                """;
+
+        try (
+                Connection connection =
+                        dataSource.getConnection();
+
+                PreparedStatement ps =
+                        connection.prepareStatement(sql)
+        ) {
+
+            ps.setObject(
+                    1,
+                    apiId
+            );
+
+            ResultSet rs =
+                    ps.executeQuery();
+
+            if (rs.next()) {
+
+                return Optional.of(
+                        map(rs)
+                );
+            }
+        }
+
+        return Optional.empty();
+    }
+
+    // =====================================================
+    // LIST ALL
+    // =====================================================
+
+    public List<ApiRegistryRecord> findAll()
+            throws Exception {
+
+        String sql =
+                """
+                select api_id,
+                       domain,
+                       api_name,
+                       api_path,
+                       http_method,
+                       datasource_key,
+                       status,
+                       created_at,
+                       updated_at
+                from api_registry
+                order by api_name
+                """;
+
+        List<ApiRegistryRecord> result =
+                new ArrayList<>();
+
+        try (
+                Connection connection =
+                        dataSource.getConnection();
+
+                PreparedStatement ps =
+                        connection.prepareStatement(sql);
+
+                ResultSet rs =
+                        ps.executeQuery()
+        ) {
+
+            while (rs.next()) {
+
+                result.add(
+                        map(rs)
+                );
+            }
+        }
+
+        return result;
+    }
+
+    // =====================================================
+    // FIND BY PATH + METHOD
+    // =====================================================
+
+    public Optional<ApiRegistryRecord> findByPathAndMethod(
+            String path,
+            String method
+    ) throws Exception {
+
+        String sql =
+                """
+                select api_id,
+                       domain,
+                       api_name,
+                       api_path,
+                       http_method,
+                       datasource_key,
+                       status,
+                       created_at,
+                       updated_at
+                from api_registry
+                where api_path = ?
+                  and upper(http_method) = upper(?)
+                """;
+
+        try (
+                Connection connection =
+                        dataSource.getConnection();
+
+                PreparedStatement ps =
+                        connection.prepareStatement(sql)
+        ) {
+
+            ps.setString(
+                    1,
+                    path
+            );
+
+            ps.setString(
+                    2,
+                    method
+            );
+
+            ResultSet rs =
+                    ps.executeQuery();
+
+            if (rs.next()) {
+
+                return Optional.of(
+                        map(rs)
+                );
+            }
+        }
+
+        return Optional.empty();
+    }
+
+    // =====================================================
+    // UPDATE SWAGGER
+    // =====================================================
+
+    public void updateSwagger(
+            UUID apiId,
+            String swaggerJson
+    ) throws Exception {
+
+        String sql =
+                """
+                update api_registry
+                set swagger_json = ?::jsonb,
+                    updated_at = now()
+                where api_id = ?
+                """;
+
+        try (
+                Connection connection =
+                        dataSource.getConnection();
+
+                PreparedStatement ps =
+                        connection.prepareStatement(sql)
+        ) {
+
+            ps.setString(
+                    1,
+                    swaggerJson
+            );
+
+            ps.setObject(
+                    2,
+                    apiId
+            );
+
+            ps.executeUpdate();
+        }
+    }
+
+    // =====================================================
+    // GET SWAGGER
+    // =====================================================
+
+    public Optional<String> getSwagger(
+            UUID apiId
+    ) throws Exception {
+
+        String sql =
+                """
+                select swagger_json::text
+                from api_registry
+                where api_id = ?
+                """;
+
+        try (
+                Connection connection =
+                        dataSource.getConnection();
+
+                PreparedStatement ps =
+                        connection.prepareStatement(sql)
+        ) {
+
+            ps.setObject(
+                    1,
+                    apiId
+            );
+
+            ResultSet rs =
+                    ps.executeQuery();
+
+            if (rs.next()) {
+
+                return Optional.ofNullable(
+                        rs.getString(1)
+                );
+            }
+        }
+
+        return Optional.empty();
+    }
+
+    // =====================================================
+    // DELETE
+    // =====================================================
+
+    public void delete(
+            UUID apiId
+    ) throws Exception {
+
+        String sql =
+                """
+                delete from api_registry
+                where api_id = ?
+                """;
+
+        try (
+                Connection connection =
+                        dataSource.getConnection();
+
+                PreparedStatement ps =
+                        connection.prepareStatement(sql)
+        ) {
+
+            ps.setObject(
+                    1,
+                    apiId
+            );
+
+            ps.executeUpdate();
+        }
+    }
+
+    // =====================================================
+    // UPDATE STATUS
+    // =====================================================
+
+    public void updateStatus(
+            UUID apiId,
+            String status
+    ) throws Exception {
+
+        String sql =
+                """
+                update api_registry
+                set status = ?,
+                    updated_at = now()
+                where api_id = ?
+                """;
+
+        try (
+                Connection connection =
+                        dataSource.getConnection();
+
+                PreparedStatement ps =
+                        connection.prepareStatement(sql)
+        ) {
+
+            ps.setString(
+                    1,
+                    status
+            );
+
+            ps.setObject(
+                    2,
+                    apiId
+            );
+
+            ps.executeUpdate();
+        }
+    }
+
+    // =====================================================
+    // MAP RESULTSET
+    // =====================================================
+
+    private ApiRegistryRecord map(
+            ResultSet rs
+    ) throws Exception {
+
+        return new ApiRegistryRecord(
+
+                (UUID) rs.getObject(
+                        "api_id"
+                ),
+
+                rs.getString(
+                        "domain"
+                ),
+
+                rs.getString(
+                        "api_name"
+                ),
+
+                rs.getString(
+                        "api_path"
+                ),
+
+                rs.getString(
+                        "http_method"
+                ),
+
+                rs.getString(
+                        "datasource_key"
+                ),
+
+                rs.getString(
+                        "status"
+                ),
+
+                rs.getTimestamp(
+                        "created_at"
+                ).toLocalDateTime(),
+
+                rs.getTimestamp(
+                        "updated_at"
+                ).toLocalDateTime()
+        );
+    }
+}
