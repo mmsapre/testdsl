@@ -1,0 +1,25 @@
+package com.mas.sap.prak.admin.record;
+
+import java.time.LocalDateTime;
+import java.util.UUID;
+
+public record ApiRegistryRecord(
+
+        UUID apiId,
+
+        String domain,
+
+        String apiName,
+
+        String apiPath,
+
+        String method,
+
+        String datasourceKey,
+
+        String status,
+
+        LocalDateTime createdAt,
+
+        LocalDateTime updatedAt
+) {}
