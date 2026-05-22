@@ -1,0 +1,98 @@
+package com.mas.sap.prak.admin.repository;
+
+import com.mas.sap.prak.admin.record.ApiRegistryRecord;
+
+import javax.sql.DataSource;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+
+public class ApiRegistryRepository {
+
+    private final DataSource dataSource;
+
+    public ApiRegistryRepository(
+            DataSource dataSource
+    ) {
+
+        this.dataSource = dataSource;
+    }
+
+    public void insert(
+            ApiRegistryRecord record
+    ) throws Exception {
+
+        String sql =
+                """
+                insert into api_registry
+                (
+                    api_id,
+                    domain,
+                    api_name,
+                    api_path,
+                    http_method,
+                    datasource_key,
+                    status,
+                    created_at,
+                    updated_at
+                )
+                values
+                (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """;
+
+        try (
+                Connection connection =
+                        dataSource.getConnection();
+
+                PreparedStatement ps =
+                        connection.prepareStatement(sql)
+        ) {
+
+            ps.setObject(
+                    1,
+                    record.apiId()
+            );
+
+            ps.setString(
+                    2,
+                    record.domain()
+            );
+
+            ps.setString(
+                    3,
+                    record.apiName()
+            );
+
+            ps.setString(
+                    4,
+                    record.apiPath()
+            );
+
+            ps.setString(
+                    5,
+                    record.method()
+            );
+
+            ps.setString(
+                    6,
+                    record.datasourceKey()
+            );
+
+            ps.setString(
+                    7,
+                    record.status()
+            );
+
+            ps.setObject(
+                    8,
+                    record.createdAt()
+            );
+
+            ps.setObject(
+                    9,
+                    record.updatedAt()
+            );
+
+            ps.executeUpdate();
+        }
+    }
+}
