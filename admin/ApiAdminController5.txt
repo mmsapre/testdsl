@@ -1,0 +1,70 @@
+package com.mas.sap.prak.admin.controller;
+
+import com.mas.sap.prak.admin.dto.ApiRegistrationRequest;
+import com.mas.sap.prak.admin.service.ApiAdminService;
+import com.mas.sap.prak.swagger.SwaggerTaskService;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.Map;
+import java.util.UUID;
+
+@RestController
+@RequestMapping("/admin/apis")
+public class ApiAdminController {
+
+    private final ApiAdminService service;
+
+    private final SwaggerTaskService swaggerTaskService;
+
+    public ApiAdminController(
+            ApiAdminService service,
+            SwaggerTaskService swaggerTaskService
+    ) {
+
+        this.service = service;
+
+        this.swaggerTaskService =
+                swaggerTaskService;
+    }
+
+    @PostMapping
+    public Object register(
+            @RequestBody ApiRegistrationRequest request
+    ) {
+
+        try {
+
+            UUID apiId =
+                    service.register(
+                            request
+                    );
+
+            swaggerTaskService.submit(
+                    apiId
+            );
+
+            return Map.of(
+
+                    "status",
+                    "SUCCESS",
+
+                    "apiId",
+                    apiId,
+
+                    "swaggerTask",
+                    "SCHEDULED"
+            );
+
+        } catch (Exception ex) {
+
+            return Map.of(
+
+                    "status",
+                    "ERROR",
+
+                    "message",
+                    ex.getMessage()
+            );
+        }
+    }
+}
