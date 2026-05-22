@@ -1,0 +1,12 @@
+package com.mas.sap.prak.admin.dto;
+
+import java.util.List;
+
+public record TableRequest(
+
+        String tableName,
+
+        String aliasName,
+
+        List<ColumnRequest> columns
+) {}
